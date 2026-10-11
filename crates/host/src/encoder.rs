@@ -1,26 +1,58 @@
-//! H.264 encoding. Uses the bundled OpenH264 software encoder for now because it works the
-//! same on every OS. Hardware encoders (VideoToolbox, Media Foundation, VAAPI) can slot in
-//! behind the same `encode` signature later.
+//! H.264 encoding. Each platform can offer a hardware encoder (VideoToolbox on macOS so
+//! far); the bundled OpenH264 software encoder works everywhere as the fallback.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use clap::ValueEnum;
 use openh264::OpenH264API;
 use openh264::encoder::{
     BitRate, Complexity, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, RateControlMode,
     UsageType,
 };
 
-use crate::frame::I420Frame;
-
-pub struct H264Encoder {
-    enc: Encoder,
-}
+use crate::frame::Frame;
 
 pub struct Encoded {
+    /// H.264 Annex-B access unit. Keyframes carry their SPS/PPS.
     pub data: Vec<u8>,
     pub keyframe: bool,
 }
 
-impl H264Encoder {
+pub trait VideoEncoder: Send {
+    fn name(&self) -> &'static str;
+    /// Returns `None` if the encoder chose to drop this frame.
+    fn encode(&mut self, frame: &Frame, force_keyframe: bool) -> Result<Option<Encoded>>;
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum EncoderChoice {
+    /// Hardware if this machine has it, otherwise software.
+    Auto,
+    Hardware,
+    Software,
+}
+
+pub fn create(choice: EncoderChoice, width: u32, height: u32, fps: u32, bitrate: u32) -> Result<Box<dyn VideoEncoder>> {
+    match choice {
+        EncoderChoice::Software => Ok(Box::new(SoftwareEncoder::new(fps, bitrate)?)),
+        EncoderChoice::Hardware => {
+            crate::platform::hardware_encoder(width, height, fps, bitrate).context("hardware encoder unavailable")
+        }
+        EncoderChoice::Auto => match crate::platform::hardware_encoder(width, height, fps, bitrate) {
+            Ok(e) => Ok(e),
+            Err(e) => {
+                tracing::warn!("no hardware encoder ({e:#}); using software");
+                Ok(Box::new(SoftwareEncoder::new(fps, bitrate)?))
+            }
+        },
+    }
+}
+
+/// OpenH264, compiled from source. Portable but CPU heavy above 1440p.
+pub struct SoftwareEncoder {
+    enc: Encoder,
+}
+
+impl SoftwareEncoder {
     pub fn new(fps: u32, bitrate_bps: u32) -> Result<Self> {
         let config = EncoderConfig::new()
             .usage_type(UsageType::ScreenContentRealTime)
@@ -39,11 +71,19 @@ impl H264Encoder {
         Ok(Self { enc: Encoder::with_api_config(OpenH264API::from_source(), config)? })
     }
 
-    pub fn encode(&mut self, frame: &I420Frame, force_keyframe: bool) -> Result<Option<Encoded>> {
+}
+
+impl VideoEncoder for SoftwareEncoder {
+    fn name(&self) -> &'static str {
+        "OpenH264 (software)"
+    }
+
+    fn encode(&mut self, frame: &Frame, force_keyframe: bool) -> Result<Option<Encoded>> {
+        let Some(frame) = frame.to_i420() else { return Ok(None) };
         if force_keyframe {
             self.enc.force_intra_frame();
         }
-        let bitstream = self.enc.encode(frame)?;
+        let bitstream = self.enc.encode(&*frame)?;
         let frame_type = bitstream.frame_type();
         if matches!(frame_type, FrameType::Skip | FrameType::Invalid) {
             return Ok(None);
@@ -90,7 +130,7 @@ mod tests {
     #[test]
     fn encodes_a_frame() {
         let (w, h) = (64, 48);
-        let frame = I420Frame {
+        let frame = crate::frame::I420Frame {
             width: w,
             height: h,
             y: vec![128; w * h],
@@ -98,8 +138,8 @@ mod tests {
             v: vec![128; w * h / 4],
             captured_at: std::time::Instant::now(),
         };
-        let mut enc = H264Encoder::new(30, 1_000_000).unwrap();
-        let out = enc.encode(&frame, true).unwrap().expect("first frame is encoded");
+        let mut enc = SoftwareEncoder::new(30, 1_000_000).unwrap();
+        let out = enc.encode(&Frame::I420(frame), true).unwrap().expect("first frame is encoded");
         assert!(out.keyframe);
         assert_eq!(&out.data[..4], &[0, 0, 0, 1]);
     }

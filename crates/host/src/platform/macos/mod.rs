@@ -1,9 +1,11 @@
 mod capture;
 mod cg;
 mod input;
+mod videotoolbox;
 mod virtual_display;
 
-pub use capture::Capture;
+pub use capture::{Capture, NativeFrame};
+pub use videotoolbox::hardware_encoder;
 pub use input::Injector;
 pub use virtual_display::VirtualDisplay;
 

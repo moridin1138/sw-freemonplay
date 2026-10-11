@@ -10,7 +10,7 @@ use fmp_proto::{
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
-use crate::encoder::{H264Encoder, default_bitrate, fit_stream_size};
+use crate::encoder::{EncoderChoice, default_bitrate, fit_stream_size};
 use crate::frame::{FrameSlot, Next};
 use crate::pattern::Pattern;
 use crate::platform::{Capture, Injector, VirtualDisplay};
@@ -21,6 +21,7 @@ pub struct Ctx {
     pub host_name: String,
     pub max_fps: u32,
     pub bitrate_bps: Option<u32>,
+    pub encoder: EncoderChoice,
     pub allow_input: bool,
     /// Stream a generated test picture instead of a virtual display.
     pub test_pattern: bool,
@@ -121,9 +122,10 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     let (tx, mut rx) = mpsc::channel::<VideoFrame>(2);
     let encoder = {
         let slot = slot.clone();
+        let encoder_choice = ctx.encoder;
         std::thread::Builder::new()
             .name("encoder".into())
-            .spawn(move || encode_loop(&slot, fps, bitrate, tx))?
+            .spawn(move || encode_loop(&slot, encoder_choice, (width, height), fps, bitrate, tx))?
     };
 
     let sender = async {
@@ -194,8 +196,16 @@ fn serial_for(client_id: &str) -> u32 {
     client_id.bytes().fold(0x811c_9dc5u32, |h, b| (h ^ b as u32).wrapping_mul(0x0100_0193))
 }
 
-fn encode_loop(slot: &FrameSlot, fps: u32, bitrate: u32, tx: mpsc::Sender<VideoFrame>) -> Result<()> {
-    let mut encoder = H264Encoder::new(fps, bitrate)?;
+fn encode_loop(
+    slot: &FrameSlot,
+    choice: EncoderChoice,
+    (width, height): (u32, u32),
+    fps: u32,
+    bitrate: u32,
+    tx: mpsc::Sender<VideoFrame>,
+) -> Result<()> {
+    let mut encoder = crate::encoder::create(choice, width, height, fps, bitrate)?;
+    tracing::info!("encoding with {}", encoder.name());
     let start = Instant::now();
     let mut need_keyframe = true;
     loop {
@@ -206,7 +216,7 @@ fn encode_loop(slot: &FrameSlot, fps: u32, bitrate: u32, tx: mpsc::Sender<VideoF
         let Some(out) = encoder.encode(&frame, keyframe || need_keyframe)? else { continue };
         need_keyframe = false;
         let video = VideoFrame {
-            pts_us: frame.captured_at.saturating_duration_since(start).as_micros() as u64,
+            pts_us: frame.captured_at().saturating_duration_since(start).as_micros() as u64,
             keyframe: out.keyframe,
             data: out.data,
         };

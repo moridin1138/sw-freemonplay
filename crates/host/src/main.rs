@@ -35,6 +35,9 @@ struct Args {
     /// Video bitrate in Mbit/s. Defaults to a value based on resolution and frame rate.
     #[arg(long)]
     bitrate_mbps: Option<f64>,
+    /// Video encoder.
+    #[arg(long, value_enum, default_value_t = encoder::EncoderChoice::Auto)]
+    encoder: encoder::EncoderChoice,
     /// Ignore mouse, keyboard and touch from clients (view only).
     #[arg(long)]
     no_input: bool,
@@ -98,6 +101,7 @@ async fn main() -> Result<()> {
         host_name,
         max_fps: args.max_fps.clamp(1, 240),
         bitrate_bps: args.bitrate_mbps.map(|m| (m * 1e6) as u32),
+        encoder: args.encoder,
         allow_input: !args.no_input,
         test_pattern: args.test_pattern,
     });

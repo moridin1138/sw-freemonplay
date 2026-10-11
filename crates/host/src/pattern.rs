@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use fmp_proto::InputEvent;
 
-use crate::frame::{FrameSlot, I420Frame};
+use crate::frame::{Frame, FrameSlot, I420Frame};
 
 pub struct Pattern {
     stop: Arc<AtomicBool>,
@@ -26,7 +26,7 @@ impl Pattern {
             let mut t = 0usize;
             while !s.load(Ordering::Relaxed) {
                 let (px, py) = *p.lock().unwrap();
-                slot.push(draw(w, h, t, px, py));
+                slot.push(Frame::I420(draw(w, h, t, px, py)));
                 t += 1;
                 next += interval;
                 std::thread::sleep(next.saturating_duration_since(Instant::now()));

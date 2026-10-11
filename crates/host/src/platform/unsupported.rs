@@ -15,6 +15,10 @@ use fmp_proto::{DisplayRequest, InputEvent};
 
 use crate::frame::FrameSlot;
 
+pub fn hardware_encoder(_w: u32, _h: u32, _fps: u32, _bitrate: u32) -> Result<Box<dyn crate::encoder::VideoEncoder>> {
+    bail!("no hardware encoder support on this OS yet")
+}
+
 pub fn check_permissions() -> Result<()> {
     bail!("this OS can't host virtual displays yet (only macOS so far). The client works here though.")
 }

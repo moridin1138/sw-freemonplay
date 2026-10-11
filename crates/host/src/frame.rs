@@ -1,9 +1,37 @@
 //! Raw frames and the hand-off between the capture callback and the encoder thread.
 
+use std::borrow::Cow;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+/// A captured picture. Hardware encoders take the OS's native buffer directly (no copy);
+/// the software encoder converts to I420 when it needs to.
+pub enum Frame {
+    I420(I420Frame),
+    #[cfg(target_os = "macos")]
+    Native(crate::platform::NativeFrame),
+}
+
+impl Frame {
+    pub fn captured_at(&self) -> Instant {
+        match self {
+            Frame::I420(f) => f.captured_at,
+            #[cfg(target_os = "macos")]
+            Frame::Native(f) => f.captured_at,
+        }
+    }
+
+    pub fn to_i420(&self) -> Option<Cow<'_, I420Frame>> {
+        match self {
+            Frame::I420(f) => Some(Cow::Borrowed(f)),
+            #[cfg(target_os = "macos")]
+            Frame::Native(f) => f.to_i420().map(Cow::Owned),
+        }
+    }
+}
+
 /// A tightly packed I420 frame (no row padding).
+#[derive(Clone)]
 pub struct I420Frame {
     pub width: usize,
     pub height: usize,
@@ -62,19 +90,19 @@ pub struct FrameSlot {
 
 #[derive(Default)]
 struct SlotState {
-    latest: Option<Arc<I420Frame>>,
+    latest: Option<Arc<Frame>>,
     fresh: bool,
     want_keyframe: bool,
     closed: bool,
 }
 
 pub enum Next {
-    Frame { frame: Arc<I420Frame>, keyframe: bool },
+    Frame { frame: Arc<Frame>, keyframe: bool },
     Closed,
 }
 
 impl FrameSlot {
-    pub fn push(&self, frame: I420Frame) {
+    pub fn push(&self, frame: Frame) {
         let mut s = self.state.lock().unwrap();
         s.latest = Some(Arc::new(frame));
         s.fresh = true;

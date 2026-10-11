@@ -1,4 +1,5 @@
-//! Display capture with ScreenCaptureKit, delivering NV12 which we repack as I420.
+//! Display capture with ScreenCaptureKit. Frames stay as the native NV12 `CVPixelBuffer`
+//! (an IOSurface), which VideoToolbox can encode without any copy.
 //!
 //! Uses the raw objc2 framework bindings (no Swift bridge), so it builds with just the
 //! Xcode Command Line Tools.
@@ -12,8 +13,10 @@ use dispatch2::DispatchQueue;
 use objc2::rc::Retained;
 use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
+use objc2_core_foundation::CFRetained;
 use objc2_core_media::{CMSampleBuffer, CMTime};
 use objc2_core_video::{
+    CVPixelBuffer,
     CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferGetHeightOfPlane,
     CVPixelBufferGetPlaneCount, CVPixelBufferGetWidthOfPlane, CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags,
     CVPixelBufferUnlockBaseAddress, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
@@ -25,7 +28,53 @@ use objc2_screen_capture_kit::{
 };
 
 use super::VirtualDisplay;
-use crate::frame::{FrameSlot, I420Frame};
+use crate::frame::{Frame, FrameSlot, I420Frame};
+
+/// A captured frame still in its native buffer.
+pub struct NativeFrame {
+    pub buffer: CFRetained<CVPixelBuffer>,
+    pub captured_at: Instant,
+}
+
+// SAFETY: CVPixelBuffers are reference counted, thread-safe CF objects. We never write to
+// one after capture, and reads lock it first.
+unsafe impl Send for NativeFrame {}
+unsafe impl Sync for NativeFrame {}
+
+impl NativeFrame {
+    /// Copies the NV12 picture out as packed I420 (for the software encoder).
+    pub fn to_i420(&self) -> Option<I420Frame> {
+        let pb = &*self.buffer;
+        if CVPixelBufferGetPlaneCount(pb) < 2 {
+            return None;
+        }
+        // SAFETY: lock for reading, copy out, unlock. Plane pointers are only used while
+        // locked, and each plane holds height * bytes_per_row bytes.
+        unsafe {
+            if CVPixelBufferLockBaseAddress(pb, CVPixelBufferLockFlags::ReadOnly) != 0 {
+                return None;
+            }
+            let plane = |i: usize| {
+                let base = CVPixelBufferGetBaseAddressOfPlane(pb, i) as *const u8;
+                let stride = CVPixelBufferGetBytesPerRowOfPlane(pb, i);
+                let rows = CVPixelBufferGetHeightOfPlane(pb, i);
+                (!base.is_null()).then(|| (std::slice::from_raw_parts(base, stride * rows), stride))
+            };
+            let width = CVPixelBufferGetWidthOfPlane(pb, 0) & !1;
+            let height = CVPixelBufferGetHeightOfPlane(pb, 0) & !1;
+            let frame = match (plane(0), plane(1)) {
+                (Some((y, ys)), Some((uv, uvs))) => {
+                    let mut f = I420Frame::from_nv12(width, height, y, ys, uv, uvs);
+                    f.captured_at = self.captured_at;
+                    Some(f)
+                }
+                _ => None,
+            };
+            CVPixelBufferUnlockBaseAddress(pb, CVPixelBufferLockFlags::ReadOnly);
+            frame
+        }
+    }
+}
 
 pub struct Capture {
     stream: Retained<SCStream>,
@@ -52,7 +101,9 @@ impl Capture {
             config.setPixelFormat(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange);
             config.setMinimumFrameInterval(CMTime::new(1, fps.max(1) as i32));
             config.setShowsCursor(true);
-            config.setQueueDepth(3);
+            // We hold up to two buffers (newest + the one being encoded); leave the
+            // capturer spares so it never stalls waiting for us.
+            config.setQueueDepth(5);
 
             let stream = SCStream::initWithFilter_configuration_delegate(SCStream::alloc(), &filter, &config, None);
             let output = StreamOutput::new(slot);
@@ -98,10 +149,12 @@ define_class!(
     unsafe impl SCStreamOutput for StreamOutput {
         #[unsafe(method(stream:didOutputSampleBuffer:ofType:))]
         fn did_output(&self, _stream: &SCStream, sample: &CMSampleBuffer, kind: SCStreamOutputType) {
+            // Idle frames (nothing changed on screen) carry no image; the client keeps the last one.
+            // SAFETY: reading a sample buffer ScreenCaptureKit handed us.
             if kind == SCStreamOutputType::Screen
-                && let Some(frame) = to_i420(sample)
+                && let Some(buffer) = unsafe { sample.image_buffer() }
             {
-                self.ivars().push(frame);
+                self.ivars().push(Frame::Native(NativeFrame { buffer, captured_at: Instant::now() }));
             }
         }
     }
@@ -144,35 +197,5 @@ fn find_display(id: u32) -> Result<Retained<SCDisplay>> {
             bail!("virtual display {id} never appeared in ScreenCaptureKit");
         }
         std::thread::sleep(Duration::from_millis(100));
-    }
-}
-
-fn to_i420(sample: &CMSampleBuffer) -> Option<I420Frame> {
-    // Idle frames (nothing changed on screen) carry no image; the client keeps the last one.
-    // SAFETY: reading a sample buffer ScreenCaptureKit handed us.
-    let pb = unsafe { sample.image_buffer() }?;
-    if CVPixelBufferGetPlaneCount(&pb) < 2 {
-        return None;
-    }
-    // SAFETY: lock for reading, copy out, unlock. Plane pointers are only used while locked,
-    // and each plane holds height * bytes_per_row bytes.
-    unsafe {
-        if CVPixelBufferLockBaseAddress(&pb, CVPixelBufferLockFlags::ReadOnly) != 0 {
-            return None;
-        }
-        let plane = |i: usize| {
-            let base = CVPixelBufferGetBaseAddressOfPlane(&pb, i) as *const u8;
-            let stride = CVPixelBufferGetBytesPerRowOfPlane(&pb, i);
-            let rows = CVPixelBufferGetHeightOfPlane(&pb, i);
-            (!base.is_null()).then(|| (std::slice::from_raw_parts(base, stride * rows), stride))
-        };
-        let width = CVPixelBufferGetWidthOfPlane(&pb, 0) & !1;
-        let height = CVPixelBufferGetHeightOfPlane(&pb, 0) & !1;
-        let frame = match (plane(0), plane(1)) {
-            (Some((y, ys)), Some((uv, uvs))) => Some(I420Frame::from_nv12(width, height, y, ys, uv, uvs)),
-            _ => None,
-        };
-        CVPixelBufferUnlockBaseAddress(&pb, CVPixelBufferLockFlags::ReadOnly);
-        frame
     }
 }
