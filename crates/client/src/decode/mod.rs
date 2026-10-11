@@ -25,7 +25,7 @@ mod mediafoundation;
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 mod software;
 #[cfg(target_os = "macos")]
-mod videotoolbox;
+pub mod videotoolbox;
 
 /// A decoded 4:2:0 picture. Planes keep the decoder's row padding (strides in bytes).
 pub struct YuvFrame {
@@ -44,6 +44,9 @@ pub enum Planes {
     I420 { y: Vec<u8>, u: Vec<u8>, v: Vec<u8>, y_stride: u32, uv_stride: u32 },
     /// One interleaved CbCr plane (what hardware decoders produce).
     Nv12 { y: Vec<u8>, uv: Vec<u8>, y_stride: u32, uv_stride: u32 },
+    /// The decoder's own GPU-shareable NV12 buffer, drawn without copying (macOS).
+    #[cfg(target_os = "macos")]
+    Native(videotoolbox::PixelBuffer),
 }
 
 /// Where decoders hand finished pictures. Some decoders call it from their own threads.

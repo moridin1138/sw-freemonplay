@@ -79,8 +79,10 @@ struct Planes {
     height: u32,
     nv12: bool,
     y: wgpu::Texture,
+    /// U plane (I420) or interleaved CbCr (NV12).
     u: wgpu::Texture,
-    v: wgpu::Texture,
+    /// V plane; NV12 has none.
+    v: Option<wgpu::Texture>,
     bind_group: wgpu::BindGroup,
 }
 
@@ -95,6 +97,10 @@ pub struct Renderer {
     params: wgpu::Buffer,
     linearize: bool,
     planes: Option<Planes>,
+    /// Bound in the unused V slot for NV12 (the shader ignores it).
+    placeholder: wgpu::Texture,
+    #[cfg(target_os = "macos")]
+    metal: Option<crate::render_metal::MetalImport>,
 }
 
 impl Renderer {
@@ -219,7 +225,34 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        Ok(Self { surface, device, queue, config, pipeline, layout, sampler, params, linearize, planes: None })
+        let placeholder = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("placeholder"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        #[cfg(target_os = "macos")]
+        let metal = crate::render_metal::MetalImport::new(&device);
+
+        Ok(Self {
+            surface,
+            device,
+            queue,
+            config,
+            pipeline,
+            layout,
+            sampler,
+            params,
+            linearize,
+            planes: None,
+            placeholder,
+            #[cfg(target_os = "macos")]
+            metal,
+        })
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -232,6 +265,27 @@ impl Renderer {
     }
 
     pub fn upload(&mut self, frame: &YuvFrame) {
+        #[cfg(target_os = "macos")]
+        if let decode::Planes::Native(buffer) = &frame.planes {
+            // Zero copy: draw straight from the decoder's buffer.
+            if let Some(metal) = &self.metal {
+                match metal.import(&self.device, buffer) {
+                    Ok((y, uv)) => {
+                        self.planes = Some(self.bind_planes(frame.width, frame.height, true, y, uv, None));
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::warn!("zero-copy display failed ({e:#}); copying frames from now on");
+                        self.metal = None;
+                    }
+                }
+            }
+            if let Some(planes) = buffer.to_nv12() {
+                let copied = YuvFrame { planes, received_at: frame.received_at, ..*frame };
+                self.upload(&copied);
+            }
+            return;
+        }
         let nv12 = matches!(frame.planes, decode::Planes::Nv12 { .. });
         if self.planes.as_ref().is_none_or(|p| p.width != frame.width || p.height != frame.height || p.nv12 != nv12) {
             self.planes = Some(self.make_planes(frame.width, frame.height, nv12));
@@ -242,12 +296,14 @@ impl Renderer {
             decode::Planes::I420 { y, u, v, y_stride, uv_stride } => {
                 self.write_plane(&planes.y, y, *y_stride, frame.width, frame.height);
                 self.write_plane(&planes.u, u, *uv_stride, cw, ch);
-                self.write_plane(&planes.v, v, *uv_stride, cw, ch);
+                self.write_plane(planes.v.as_ref().expect("I420 has a V plane"), v, *uv_stride, cw, ch);
             }
             decode::Planes::Nv12 { y, uv, y_stride, uv_stride } => {
                 self.write_plane(&planes.y, y, *y_stride, frame.width, frame.height);
                 self.write_plane(&planes.u, uv, *uv_stride, cw, ch);
             }
+            #[cfg(target_os = "macos")]
+            decode::Planes::Native(_) => unreachable!("handled above"),
         }
     }
 
@@ -307,13 +363,24 @@ impl Renderer {
         let (cw, ch) = (width.div_ceil(2), height.div_ceil(2));
         let r8 = wgpu::TextureFormat::R8Unorm;
         let (y, u, v) = if nv12 {
-            // The shader ignores tex_v for NV12, but the bind group still needs something there.
-            (tex("y", width, height, r8), tex("uv", cw, ch, wgpu::TextureFormat::Rg8Unorm), tex("unused", 1, 1, r8))
+            (tex("y", width, height, r8), tex("uv", cw, ch, wgpu::TextureFormat::Rg8Unorm), None)
         } else {
-            (tex("y", width, height, r8), tex("u", cw, ch, r8), tex("v", cw, ch, r8))
+            (tex("y", width, height, r8), tex("u", cw, ch, r8), Some(tex("v", cw, ch, r8)))
         };
+        self.bind_planes(width, height, nv12, y, u, v)
+    }
+
+    fn bind_planes(
+        &self,
+        width: u32,
+        height: u32,
+        nv12: bool,
+        y: wgpu::Texture,
+        u: wgpu::Texture,
+        v: Option<wgpu::Texture>,
+    ) -> Planes {
         let view = |t: &wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor::default());
-        let (vy, vu, vv) = (view(&y), view(&u), view(&v));
+        let (vy, vu, vv) = (view(&y), view(&u), view(v.as_ref().unwrap_or(&self.placeholder)));
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("yuv"),
             layout: &self.layout,

@@ -10,16 +10,17 @@ use std::sync::Mutex;
 
 use anyhow::{Context, Result, bail};
 use fmp_proto::Codec;
-use objc2_core_foundation::{CFBoolean, CFDictionary, CFNumber, CFRetained, CFString};
+use objc2_core_foundation::{CFBoolean, CFDictionary, CFNumber, CFRetained, CFString, CFType};
 use objc2_core_media::{
     CMBlockBuffer, CMFormatDescription, CMSampleBuffer, CMTime, CMVideoFormatDescriptionCreateFromH264ParameterSets,
     CMVideoFormatDescriptionCreateFromHEVCParameterSets, kCMBlockBufferAssureMemoryNowFlag, kCMVideoCodecType_HEVC,
 };
 use objc2_core_video::{
-    CVImageBuffer, CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRowOfPlane,
+    CVImageBuffer, CVPixelBuffer, CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRowOfPlane,
     CVPixelBufferGetHeightOfPlane, CVPixelBufferGetPlaneCount, CVPixelBufferGetWidthOfPlane,
     CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
-    kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+    kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey, kCVPixelBufferPixelFormatTypeKey,
+    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
 };
 use objc2_video_toolbox::{
     VTDecodeFrameFlags, VTDecodeInfoFlags, VTDecompressionOutputCallbackRecord, VTDecompressionSession,
@@ -123,9 +124,13 @@ impl Session {
 
             let spec_keys = [kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder];
             let spec = CFDictionary::<CFString, CFBoolean>::from_slices(&spec_keys, &[CFBoolean::new(true)]);
+            // NV12 in IOSurface-backed, Metal-compatible buffers, so the renderer can draw
+            // the decoder's output directly as textures.
             let nv12 = CFNumber::new_i32(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange as i32);
-            let attr_keys = [kCVPixelBufferPixelFormatTypeKey];
-            let attrs = CFDictionary::<CFString, CFNumber>::from_slices(&attr_keys, &[&nv12]);
+            let no_props = CFDictionary::<CFString, CFType>::from_slices(&[], &[]);
+            let attr_keys =
+                [kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey];
+            let attrs = CFDictionary::<CFString, CFType>::from_slices(&attr_keys, &[&nv12, &no_props, CFBoolean::new(true)]);
 
             let output: Box<Output> = Box::default();
             let callback = VTDecompressionOutputCallbackRecord {
@@ -233,12 +238,45 @@ unsafe extern "C-unwind" fn on_decoded(
     } else {
         // A null image means the decoder dropped the frame.
         // SAFETY: VideoToolbox passes a valid image buffer for the duration of the call.
-        match unsafe { image.as_ref() }.and_then(|img| unsafe { copy_nv12(img) }) {
-            Some(frame) => Ok(frame),
+        match unsafe { image.as_ref() } {
+            Some(img) => Ok(PixelBuffer::retain(img).into_frame()),
             None => return,
         }
     };
     *output.lock().unwrap() = Some(result);
+}
+
+/// A decoded NV12 picture still in VideoToolbox's (IOSurface-backed) buffer.
+#[derive(Clone)]
+pub struct PixelBuffer(pub CFRetained<CVPixelBuffer>);
+
+// SAFETY: CVPixelBuffers are reference counted, thread-safe CF objects; the decoder is done
+// writing by the time we receive one, and readers lock it or map it as a texture.
+unsafe impl Send for PixelBuffer {}
+unsafe impl Sync for PixelBuffer {}
+
+impl PixelBuffer {
+    fn retain(image: &CVImageBuffer) -> Self {
+        // SAFETY: a valid image buffer; we take our own reference.
+        Self(unsafe { CFRetained::retain(NonNull::from(image)) })
+    }
+
+    fn into_frame(self) -> YuvFrame {
+        let pb = &*self.0;
+        YuvFrame {
+            width: CVPixelBufferGetWidthOfPlane(pb, 0) as u32,
+            height: CVPixelBufferGetHeightOfPlane(pb, 0) as u32,
+            planes: Planes::Native(self),
+            pts_us: 0,
+            received_at: None,
+        }
+    }
+
+    /// Copies the planes into system memory, for when it can't be drawn directly.
+    pub fn to_nv12(&self) -> Option<Planes> {
+        // SAFETY: as in copy_nv12.
+        unsafe { copy_nv12(&self.0) }.map(|f| f.planes)
+    }
 }
 
 /// Copies an NV12 pixel buffer's planes out (with their row padding).

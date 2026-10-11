@@ -8,6 +8,8 @@ mod decode;
 mod input;
 mod net;
 mod render;
+#[cfg(target_os = "macos")]
+mod render_metal;
 mod store;
 
 use std::collections::HashSet;
