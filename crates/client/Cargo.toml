@@ -11,7 +11,6 @@ anyhow.workspace = true
 clap.workspace = true
 directories.workspace = true
 mdns-sd.workspace = true
-openh264.workspace = true
 quinn.workspace = true
 rand.workspace = true
 rustls.workspace = true
@@ -25,3 +24,29 @@ bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 wgpu = "30"
 winit = "0.30"
+
+# Each OS decodes with its own H.264 decoder (see src/decode). Linux keeps bundled
+# OpenH264 as a last resort for systems without GStreamer's H.264 plugins.
+[target.'cfg(not(any(target_os = "macos", target_os = "windows")))'.dependencies]
+openh264.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gstreamer = "0.25"
+gstreamer-app = "0.25"
+gstreamer-video = "0.25"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-foundation = "0.3"
+objc2-core-media = "0.3"
+objc2-core-video = "0.3"
+objc2-video-toolbox = "0.3"

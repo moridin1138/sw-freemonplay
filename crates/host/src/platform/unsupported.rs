@@ -15,7 +15,13 @@ use fmp_proto::{DisplayRequest, InputEvent};
 
 use crate::frame::FrameSlot;
 
-pub fn hardware_encoder(_w: u32, _h: u32, _fps: u32, _bitrate: u32) -> Result<Box<dyn crate::encoder::VideoEncoder>> {
+pub fn hardware_encoder(
+    _codec: fmp_proto::Codec,
+    _w: u32,
+    _h: u32,
+    _fps: u32,
+    _bitrate: u32,
+) -> Result<Box<dyn crate::encoder::VideoEncoder>> {
     bail!("no hardware encoder support on this OS yet")
 }
 

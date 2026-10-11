@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
-use fmp_proto::{Auth, ClientMsg, DisplayRequest, InputEvent, TouchPhase};
+use fmp_proto::{Auth, ClientMsg, Codec, DisplayRequest, InputEvent, TouchPhase};
 use tokio::sync::{mpsc, oneshot};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -49,6 +49,10 @@ struct Args {
     /// Retina-style 2x rendering on the host. Auto uses it on high-density screens.
     #[arg(long, value_enum, default_value_t = Scale::Auto)]
     scale: Scale,
+    /// Video codec to ask for. Auto offers HEVC first when this machine decodes it in
+    /// hardware, with H.264 as the fallback.
+    #[arg(long, value_enum, default_value_t = CodecArg::Auto)]
+    codec: CodecArg,
     /// Name this screen shows up as on the host. Defaults to this computer's hostname.
     #[arg(long)]
     name: Option<String>,
@@ -66,9 +70,16 @@ enum Scale {
     Two,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum CodecArg {
+    Auto,
+    H264,
+    H265,
+}
+
 #[derive(Debug)]
 pub enum UserEvent {
-    Connected { host_name: String, width: u32, height: u32 },
+    Connected { host_name: String, width: u32, height: u32, codec: Codec },
     Frame,
     Closed(String),
 }
@@ -87,15 +98,32 @@ fn main() -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     let store = ClientStore::open(args.config_dir.clone())?;
     let target = rt.block_on(choose_target(args.host.as_deref()))?;
-    println!("Connecting to {} ({})", target.name, target.addr);
-    let connected = rt.block_on(net::connect(target.addr))?;
+    println!("Connecting to {target}");
+    let mut connected = rt.block_on(net::connect_any(&target))?;
 
     let auth = match store.host(&connected.fingerprint).and_then(|h| store::unhex(&h.token_hex)) {
         Some(token) => Auth::Token(token),
-        None => Auth::PairingCode(match &args.code {
-            Some(code) => code.clone(),
-            None => prompt(&format!("First time connecting to {}. Enter the pairing code it shows: ", target.name))?,
-        }),
+        None => {
+            let code = match &args.code {
+                Some(code) => code.clone(),
+                None => {
+                    // The host only waits a few seconds for us to start the session, so don't
+                    // hold the connection open while a person types: ask, then reconnect.
+                    let fingerprint = connected.fingerprint.clone();
+                    connected.conn.close(0u32.into(), b"pairing");
+                    let code = prompt(&format!(
+                        "First time connecting to {}. Enter the pairing code it shows: ",
+                        target.name
+                    ))?;
+                    connected = rt.block_on(net::connect_any(&target))?;
+                    if connected.fingerprint != fingerprint {
+                        bail!("the host's identity changed while pairing; not sending the code");
+                    }
+                    code
+                }
+            };
+            Auth::PairingCode(code)
+        }
     };
 
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
@@ -108,6 +136,11 @@ fn main() -> Result<()> {
         connected,
         auth,
         client_name: args.name.clone().unwrap_or_else(hostname),
+        codecs: match args.codec {
+            CodecArg::Auto => decode::supported_codecs(),
+            CodecArg::H264 => vec![Codec::H264],
+            CodecArg::H265 => vec![Codec::H265],
+        },
         store,
         display: display_rx,
         outgoing: out_rx,
@@ -151,11 +184,14 @@ async fn choose_target(host: Option<&str>) -> Result<net::Target> {
     println!("Looking for freemonplay hosts on the network...");
     let mut found = tokio::task::spawn_blocking(|| net::discover(Duration::from_secs(3))).await??;
     match found.len() {
-        0 => bail!("no hosts found. Is the host running on the same network? You can also pass --host <ip>"),
+        0 => bail!(
+            "no hosts found. Is the host running on the same network? Firewalls can block discovery; \
+             you can also pass --host <ip>"
+        ),
         1 => Ok(found.remove(0)),
         _ => {
             for (i, t) in found.iter().enumerate() {
-                println!("  {}) {} ({})", i + 1, t.name, t.addr);
+                println!("  {}) {t}", i + 1);
             }
             let pick: usize = prompt("Which host? ")?.parse().context("enter a number")?;
             if pick == 0 || pick > found.len() {
@@ -263,8 +299,8 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::Connected { host_name, width, height } => {
-                tracing::info!("connected to {host_name}, receiving {width}x{height}");
+            UserEvent::Connected { host_name, width, height, codec } => {
+                tracing::info!("connected to {host_name}, receiving {width}x{height} {codec}");
                 self.video = Some((width, height));
                 if let Some(w) = &self.window {
                     w.set_title(&format!("freemonplay: {host_name}"));

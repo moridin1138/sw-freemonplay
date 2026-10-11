@@ -1,8 +1,10 @@
-//! H.264 encoding. Each platform can offer a hardware encoder (VideoToolbox on macOS so
-//! far); the bundled OpenH264 software encoder works everywhere as the fallback.
+//! Video encoding. Each platform can offer a hardware encoder (VideoToolbox on macOS so
+//! far, H.264 and HEVC); the bundled OpenH264 software encoder (H.264 only) works
+//! everywhere as the fallback.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
+use fmp_proto::Codec;
 use openh264::OpenH264API;
 use openh264::encoder::{
     BitRate, Complexity, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, RateControlMode,
@@ -12,7 +14,7 @@ use openh264::encoder::{
 use crate::frame::Frame;
 
 pub struct Encoded {
-    /// H.264 Annex-B access unit. Keyframes carry their SPS/PPS.
+    /// Annex-B access unit. Keyframes carry their parameter sets.
     pub data: Vec<u8>,
     pub keyframe: bool,
 }
@@ -31,19 +33,78 @@ pub enum EncoderChoice {
     Software,
 }
 
-pub fn create(choice: EncoderChoice, width: u32, height: u32, fps: u32, bitrate: u32) -> Result<Box<dyn VideoEncoder>> {
-    match choice {
-        EncoderChoice::Software => Ok(Box::new(SoftwareEncoder::new(fps, bitrate)?)),
-        EncoderChoice::Hardware => {
-            crate::platform::hardware_encoder(width, height, fps, bitrate).context("hardware encoder unavailable")
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum CodecChoice {
+    /// Whatever the client prefers that this host can encode.
+    Auto,
+    H264,
+    H265,
+}
+
+impl CodecChoice {
+    pub fn only(self) -> Option<Codec> {
+        match self {
+            CodecChoice::Auto => None,
+            CodecChoice::H264 => Some(Codec::H264),
+            CodecChoice::H265 => Some(Codec::H265),
         }
-        EncoderChoice::Auto => match crate::platform::hardware_encoder(width, height, fps, bitrate) {
-            Ok(e) => Ok(e),
-            Err(e) => {
-                tracing::warn!("no hardware encoder ({e:#}); using software");
-                Ok(Box::new(SoftwareEncoder::new(fps, bitrate)?))
+    }
+}
+
+/// Picks the first codec in the client's preference order that we can encode (optionally
+/// restricted to `only`), and creates its encoder. Returns the encoder, codec and bitrate.
+pub fn negotiate(
+    choice: EncoderChoice,
+    only: Option<Codec>,
+    client_codecs: &[Codec],
+    (width, height, fps): (u32, u32, u32),
+    bitrate_for: impl Fn(Codec) -> u32,
+) -> Result<(Box<dyn VideoEncoder>, Codec, u32)> {
+    let mut problems = Vec::new();
+    for &codec in client_codecs.iter().filter(|&&c| only.is_none_or(|o| o == c)) {
+        let bitrate = bitrate_for(codec);
+        match create(choice, codec, width, height, fps, bitrate) {
+            Ok(encoder) => return Ok((encoder, codec, bitrate)),
+            Err(e) => problems.push(format!("{codec}: {e:#}")),
+        }
+    }
+    let offered: Vec<String> = client_codecs.iter().map(Codec::to_string).collect();
+    let mut message = format!("no usable codec in common (client decodes {})", offered.join(", "));
+    if let Some(o) = only {
+        message += &format!("; host is limited to {o}");
+    }
+    if !problems.is_empty() {
+        message += &format!("; {}", problems.join("; "));
+    }
+    bail!(message)
+}
+
+pub fn create(
+    choice: EncoderChoice,
+    codec: Codec,
+    width: u32,
+    height: u32,
+    fps: u32,
+    bitrate: u32,
+) -> Result<Box<dyn VideoEncoder>> {
+    let software = || -> Result<Box<dyn VideoEncoder>> {
+        if codec != Codec::H264 {
+            bail!("the software encoder only does H.264");
+        }
+        Ok(Box::new(SoftwareEncoder::new(fps, bitrate)?))
+    };
+    let hardware = || {
+        crate::platform::hardware_encoder(codec, width, height, fps, bitrate).context("hardware encoder unavailable")
+    };
+    match choice {
+        EncoderChoice::Software => software(),
+        EncoderChoice::Hardware => hardware(),
+        EncoderChoice::Auto => hardware().or_else(|e| {
+            if codec == Codec::H264 {
+                tracing::warn!("{e:#}; using software");
             }
-        },
+            software()
+        }),
     }
 }
 
@@ -96,11 +157,15 @@ impl VideoEncoder for SoftwareEncoder {
     }
 }
 
-/// A reasonable LAN bitrate for screen content: about 0.1 bits per pixel per frame,
-/// clamped to 4..=50 Mbit/s.
-pub fn default_bitrate(width: u32, height: u32, fps: u32) -> u32 {
-    let bps = (width as f64 * height as f64 * fps as f64 * 0.1) as u64;
-    bps.clamp(4_000_000, 50_000_000) as u32
+/// A reasonable LAN bitrate for screen content: about 0.1 bits per pixel per frame for
+/// H.264 (HEVC gets 60% of that for similar quality), clamped to 3..=50 Mbit/s.
+pub fn default_bitrate(codec: Codec, width: u32, height: u32, fps: u32) -> u32 {
+    let bits_per_pixel = match codec {
+        Codec::H264 => 0.1,
+        Codec::H265 => 0.06,
+    };
+    let bps = (width as f64 * height as f64 * fps as f64 * bits_per_pixel) as u64;
+    bps.clamp(3_000_000, 50_000_000) as u32
 }
 
 /// OpenH264 tops out at 3840x2160 and needs even dimensions. Scale down to fit, keeping

@@ -38,6 +38,10 @@ struct Args {
     /// Video encoder.
     #[arg(long, value_enum, default_value_t = encoder::EncoderChoice::Auto)]
     encoder: encoder::EncoderChoice,
+    /// Video codec. Auto uses the client's preference (HEVC when it can decode it in
+    /// hardware) as long as this host can encode it.
+    #[arg(long, value_enum, default_value_t = encoder::CodecChoice::Auto)]
+    codec: encoder::CodecChoice,
     /// Ignore mouse, keyboard and touch from clients (view only).
     #[arg(long)]
     no_input: bool,
@@ -54,7 +58,8 @@ struct Args {
     /// Needs no permissions and works on any OS.
     #[arg(long)]
     test_pattern: bool,
-    /// Diagnostic: create a virtual display (e.g. 1920x1080, or 2732x2048@2x for HiDPI) for a few seconds.
+    /// Diagnostic: create a virtual display for a few seconds. Examples: 1920x1080,
+    /// 2732x2048@2x (HiDPI), 1920x1080:30 (30 Hz).
     #[arg(long, value_name = "WxH")]
     probe_display: Option<String>,
 }
@@ -102,6 +107,7 @@ async fn main() -> Result<()> {
         max_fps: args.max_fps.clamp(1, 240),
         bitrate_bps: args.bitrate_mbps.map(|m| (m * 1e6) as u32),
         encoder: args.encoder,
+        codec: args.codec.only(),
         allow_input: !args.no_input,
         test_pattern: args.test_pattern,
     });
@@ -145,6 +151,9 @@ fn make_endpoint(store: &HostStore, port: u16) -> Result<quinn::Endpoint> {
 
 fn advertise(host_id: &str, name: &str, port: u16) -> Result<mdns_sd::ServiceDaemon> {
     let mdns = mdns_sd::ServiceDaemon::new()?;
+    // Only advertise LAN IPv4 addresses. Loopback is useless to other machines, and IPv6
+    // link-local addresses (e.g. macOS's fe80::1 on lo0) can't be dialled without a scope id.
+    mdns.disable_interface(vec![mdns_sd::IfKind::IPv6, mdns_sd::IfKind::LoopbackV4])?;
     let host = format!("freemonplay-{host_id}.local.");
     let version = PROTOCOL_VERSION.to_string();
     let props = [("id", host_id), ("name", name), ("proto", version.as_str())];
@@ -154,15 +163,19 @@ fn advertise(host_id: &str, name: &str, port: u16) -> Result<mdns_sd::ServiceDae
 }
 
 fn probe_display(size: &str) -> Result<()> {
+    let (size, refresh_hz) = match size.split_once(':') {
+        Some((s, hz)) => (s, hz.parse().context("refresh rate after ':' must be a number")?),
+        None => (size, 60),
+    };
     let (size, hidpi) = match size.strip_suffix("@2x") {
         Some(s) => (s, true),
         None => (size, false),
     };
-    let (w, h) = size.split_once('x').context("expected WxH, e.g. 1920x1080 or 2732x2048@2x")?;
+    let (w, h) = size.split_once('x').context("expected WxH, e.g. 1920x1080, 2732x2048@2x or 1920x1080:30")?;
     let req = fmp_proto::DisplayRequest {
         width: w.parse()?,
         height: h.parse()?,
-        refresh_hz: 60,
+        refresh_hz,
         hidpi,
         size_mm: None,
     };

@@ -1,5 +1,6 @@
-//! Draws I420 frames with wgpu: three single-channel textures, converted to RGB in the
-//! fragment shader, letterboxed to keep the aspect ratio.
+//! Draws 4:2:0 frames with wgpu, converting YUV to RGB in the fragment shader and
+//! letterboxing to keep the aspect ratio. I420 uses three single-channel textures; NV12
+//! uses a single-channel luma texture plus a two-channel (CbCr) chroma texture.
 
 use std::sync::Arc;
 
@@ -7,14 +8,15 @@ use anyhow::{Context, Result};
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
-use crate::decode::YuvFrame;
+use crate::decode::{self, YuvFrame};
 
 const SHADER: &str = r#"
 struct Params {
     scale: vec2<f32>,
     // 1.0 when the surface is sRGB and will gamma-encode our output a second time.
     linearize: f32,
-    _pad: f32,
+    // 1.0 when chroma is interleaved in tex_u (NV12); tex_v is then unused.
+    nv12: f32,
 };
 
 @group(0) @binding(0) var tex_y: texture_2d<f32>;
@@ -45,8 +47,13 @@ fn vs_main(@builtin(vertex_index) i: u32) -> VertexOut {
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // BT.709, limited ("video") range, which is what the host captures.
     let y = (textureSample(tex_y, samp, in.uv).r - 16.0 / 255.0) * (255.0 / 219.0);
-    let cb = (textureSample(tex_u, samp, in.uv).r - 128.0 / 255.0) * (255.0 / 224.0);
-    let cr = (textureSample(tex_v, samp, in.uv).r - 128.0 / 255.0) * (255.0 / 224.0);
+    let chroma = textureSample(tex_u, samp, in.uv);
+    var cr_raw = textureSample(tex_v, samp, in.uv).r;
+    if params.nv12 > 0.5 {
+        cr_raw = chroma.g;
+    }
+    let cb = (chroma.r - 128.0 / 255.0) * (255.0 / 224.0);
+    let cr = (cr_raw - 128.0 / 255.0) * (255.0 / 224.0);
     var rgb = clamp(vec3(
         y + 1.5748 * cr,
         y - 0.1873 * cb - 0.4681 * cr,
@@ -64,12 +71,13 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 struct Params {
     scale: [f32; 2],
     linearize: f32,
-    _pad: f32,
+    nv12: f32,
 }
 
 struct Planes {
     width: u32,
     height: u32,
+    nv12: bool,
     y: wgpu::Texture,
     u: wgpu::Texture,
     v: wgpu::Texture,
@@ -200,7 +208,7 @@ impl Renderer {
         let linearize = format.is_srgb();
         let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("params"),
-            contents: bytemuck::bytes_of(&Params { scale: [1.0, 1.0], linearize: linearize as u32 as f32, _pad: 0.0 }),
+            contents: bytemuck::bytes_of(&Params { scale: [1.0, 1.0], linearize: linearize as u32 as f32, nv12: 0.0 }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -217,14 +225,23 @@ impl Renderer {
     }
 
     pub fn upload(&mut self, frame: &YuvFrame) {
-        if self.planes.as_ref().is_none_or(|p| p.width != frame.width || p.height != frame.height) {
-            self.planes = Some(self.make_planes(frame.width, frame.height));
+        let nv12 = matches!(frame.planes, decode::Planes::Nv12 { .. });
+        if self.planes.as_ref().is_none_or(|p| p.width != frame.width || p.height != frame.height || p.nv12 != nv12) {
+            self.planes = Some(self.make_planes(frame.width, frame.height, nv12));
         }
         let planes = self.planes.as_ref().unwrap();
         let (cw, ch) = (frame.width.div_ceil(2), frame.height.div_ceil(2));
-        self.write_plane(&planes.y, &frame.y, frame.strides.0, frame.width, frame.height);
-        self.write_plane(&planes.u, &frame.u, frame.strides.1, cw, ch);
-        self.write_plane(&planes.v, &frame.v, frame.strides.1, cw, ch);
+        match &frame.planes {
+            decode::Planes::I420 { y, u, v, y_stride, uv_stride } => {
+                self.write_plane(&planes.y, y, *y_stride, frame.width, frame.height);
+                self.write_plane(&planes.u, u, *uv_stride, cw, ch);
+                self.write_plane(&planes.v, v, *uv_stride, cw, ch);
+            }
+            decode::Planes::Nv12 { y, uv, y_stride, uv_stride } => {
+                self.write_plane(&planes.y, y, *y_stride, frame.width, frame.height);
+                self.write_plane(&planes.u, uv, *uv_stride, cw, ch);
+            }
+        }
     }
 
     pub fn render(&mut self) {
@@ -240,7 +257,8 @@ impl Renderer {
 
         if let Some(p) = &self.planes {
             let (sx, sy) = letterbox_scale((p.width, p.height), (self.config.width, self.config.height));
-            let params = Params { scale: [sx, sy], linearize: self.linearize as u32 as f32, _pad: 0.0 };
+            let params =
+                Params { scale: [sx, sy], linearize: self.linearize as u32 as f32, nv12: p.nv12 as u32 as f32 };
             self.queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&params));
         }
 
@@ -266,21 +284,27 @@ impl Renderer {
         self.queue.present(frame);
     }
 
-    fn make_planes(&self, width: u32, height: u32) -> Planes {
-        let tex = |label, w: u32, h: u32| {
+    fn make_planes(&self, width: u32, height: u32, nv12: bool) -> Planes {
+        let tex = |label, w: u32, h: u32, format| {
             self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
                 size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R8Unorm,
+                format,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             })
         };
         let (cw, ch) = (width.div_ceil(2), height.div_ceil(2));
-        let (y, u, v) = (tex("y", width, height), tex("u", cw, ch), tex("v", cw, ch));
+        let r8 = wgpu::TextureFormat::R8Unorm;
+        let (y, u, v) = if nv12 {
+            // The shader ignores tex_v for NV12, but the bind group still needs something there.
+            (tex("y", width, height, r8), tex("uv", cw, ch, wgpu::TextureFormat::Rg8Unorm), tex("unused", 1, 1, r8))
+        } else {
+            (tex("y", width, height, r8), tex("u", cw, ch, r8), tex("v", cw, ch, r8))
+        };
         let view = |t: &wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor::default());
         let (vy, vu, vv) = (view(&y), view(&u), view(&v));
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -294,7 +318,7 @@ impl Renderer {
                 wgpu::BindGroupEntry { binding: 4, resource: self.params.as_entire_binding() },
             ],
         });
-        Planes { width, height, y, u, v, bind_group }
+        Planes { width, height, nv12, y, u, v, bind_group }
     }
 
     fn write_plane(&self, texture: &wgpu::Texture, data: &[u8], stride: u32, width: u32, height: u32) {

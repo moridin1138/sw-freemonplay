@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use fmp_proto::{
-    ALPN, Auth, ClientMsg, DEFAULT_PORT, DisplayRequest, Hello, HostMsg, PROTOCOL_VERSION, SERVICE_TYPE, VideoFrame,
+    ALPN, Auth, ClientMsg, Codec, DEFAULT_PORT, DisplayRequest, Hello, HostMsg, PROTOCOL_VERSION, RejectKind,
+    SERVICE_TYPE, VideoFrame,
     read_msg, write_msg,
 };
 use rustls::DigitallySignedStruct;
@@ -24,7 +25,15 @@ use crate::UserEvent;
 
 pub struct Target {
     pub name: String,
-    pub addr: SocketAddr,
+    /// Addresses to try, best first.
+    pub addrs: Vec<SocketAddr>,
+}
+
+impl std::fmt::Display for Target {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let addrs: Vec<String> = self.addrs.iter().map(SocketAddr::to_string).collect();
+        write!(f, "{} ({})", self.name, addrs.join(", "))
+    }
 }
 
 /// Browses mDNS for `wait` and returns every host that answered.
@@ -32,21 +41,48 @@ pub fn discover(wait: Duration) -> Result<Vec<Target>> {
     let mdns = mdns_sd::ServiceDaemon::new()?;
     let rx = mdns.browse(SERVICE_TYPE)?;
     let deadline = Instant::now() + wait;
-    let mut found = BTreeMap::new();
+    // A host's addresses can arrive over several answers, so merge them per host id.
+    let mut found: BTreeMap<String, (String, u16, Vec<IpAddr>)> = BTreeMap::new();
     while let Some(left) = deadline.checked_duration_since(Instant::now()) {
         let Ok(event) = rx.recv_timeout(left) else { break };
         if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
-            let mut addrs: Vec<IpAddr> = info.addresses.iter().map(|a| a.to_ip_addr()).collect();
-            // Prefer plain IPv4; link-local IPv6 needs scope ids that are easy to get wrong.
-            addrs.sort_by_key(|a| (!a.is_ipv4(), a.is_loopback()));
-            let Some(ip) = addrs.first() else { continue };
             let id = info.get_property_val_str("id").unwrap_or(&info.fullname).to_string();
             let name = info.get_property_val_str("name").unwrap_or(&info.fullname).to_string();
-            found.insert(id, Target { name, addr: SocketAddr::new(*ip, info.port) });
+            let entry = found.entry(id).or_insert_with(|| (name, info.port, Vec::new()));
+            for ip in info.addresses.iter().map(|a| a.to_ip_addr()) {
+                if !entry.2.contains(&ip) {
+                    entry.2.push(ip);
+                }
+            }
         }
     }
     let _ = mdns.shutdown();
-    Ok(found.into_values().collect())
+    Ok(found
+        .into_values()
+        .filter_map(|(name, port, ips)| {
+            let addrs = rank_addresses(ips, port);
+            (!addrs.is_empty()).then_some(Target { name, addrs })
+        })
+        .collect())
+}
+
+/// Drops addresses another machine can't use (loopback, IPv6 link-local without a scope
+/// id) and orders the rest: private IPv4 first, then other IPv4, then IPv6.
+fn rank_addresses(ips: Vec<IpAddr>, port: u16) -> Vec<SocketAddr> {
+    let mut ips: Vec<IpAddr> = ips
+        .into_iter()
+        .filter(|ip| match ip {
+            IpAddr::V4(v4) => !v4.is_loopback() && !v4.is_unspecified(),
+            IpAddr::V6(v6) => !v6.is_loopback() && !v6.is_unspecified() && !v6.is_unicast_link_local(),
+        })
+        .collect();
+    ips.sort_by_key(|ip| match ip {
+        IpAddr::V4(v4) if v4.is_private() => 0,
+        IpAddr::V4(v4) if v4.is_link_local() => 2,
+        IpAddr::V4(_) => 1,
+        IpAddr::V6(_) => 3,
+    });
+    ips.into_iter().map(|ip| SocketAddr::new(ip, port)).collect()
 }
 
 /// Parses `host`, `host:port`, `1.2.3.4`, `[::1]:47800`, ...
@@ -57,12 +93,29 @@ pub async fn resolve(spec: &str) -> Result<Target> {
     } else {
         spec.to_string()
     };
-    let addr = tokio::net::lookup_host(&with_port)
-        .await
-        .with_context(|| format!("can't resolve {spec}"))?
-        .next()
-        .with_context(|| format!("no address for {spec}"))?;
-    Ok(Target { name: spec.to_string(), addr })
+    let mut addrs: Vec<SocketAddr> =
+        tokio::net::lookup_host(&with_port).await.with_context(|| format!("can't resolve {spec}"))?.collect();
+    // Prefer IPv4, matching what discovery does.
+    addrs.sort_by_key(|a| a.is_ipv6());
+    if addrs.is_empty() {
+        bail!("no address for {spec}");
+    }
+    Ok(Target { name: spec.to_string(), addrs })
+}
+
+/// Tries each of the target's addresses in turn and returns the first connection.
+pub async fn connect_any(target: &Target) -> Result<Connected> {
+    let mut last_error = None;
+    for &addr in &target.addrs {
+        match connect(addr).await {
+            Ok(c) => return Ok(c),
+            Err(e) => {
+                tracing::debug!("{addr}: {e:#}");
+                last_error = Some(e);
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no addresses to try")))
 }
 
 pub struct Connected {
@@ -99,7 +152,7 @@ pub async fn connect(addr: SocketAddr) -> Result<Connected> {
     let bind: SocketAddr = if addr.is_ipv6() { "[::]:0".parse()? } else { "0.0.0.0:0".parse()? };
     let mut endpoint = quinn::Endpoint::client(bind)?;
     endpoint.set_default_client_config(config);
-    let conn = tokio::time::timeout(Duration::from_secs(5), endpoint.connect(addr, "freemonplay")?)
+    let conn = tokio::time::timeout(Duration::from_secs(3), endpoint.connect(addr, "freemonplay")?)
         .await
         .with_context(|| format!("no answer from {addr} (is the host running? firewall?)"))??;
     let fingerprint = seen.lock().unwrap().clone().context("host sent no certificate")?;
@@ -155,6 +208,8 @@ pub struct Session {
     pub connected: Connected,
     pub auth: Auth,
     pub client_name: String,
+    /// Codecs to offer, most preferred first.
+    pub codecs: Vec<Codec>,
     pub store: ClientStore,
     pub display: oneshot::Receiver<DisplayRequest>,
     pub outgoing: mpsc::UnboundedReceiver<ClientMsg>,
@@ -175,17 +230,21 @@ pub async fn run(mut s: Session) -> Result<String> {
         client_name: s.client_name.clone(),
         auth: s.auth.clone(),
         display,
+        codecs: s.codecs.clone(),
     };
     write_msg(&mut send, &ClientMsg::Hello(hello)).await?;
 
     let welcome = match read_msg::<HostMsg>(&mut recv).await? {
         Some(HostMsg::Welcome(w)) => w,
-        Some(HostMsg::Rejected { reason }) => {
-            if matches!(s.auth, Auth::Token(_)) {
+        Some(HostMsg::Rejected { reason, kind }) => {
+            // Only drop our pairing when the host says it no longer knows us; a codec or
+            // version problem doesn't mean we should have to pair again.
+            if kind == RejectKind::NotPaired {
                 let _ = s.store.forget(&s.connected.fingerprint);
             }
             bail!("host refused: {reason}");
         }
+        Some(HostMsg::Notice { message }) => bail!("unexpected notice before welcome: {message}"),
         None => bail!("host closed the connection during the handshake"),
     };
     if let Some(token) = &welcome.issued_token {
@@ -196,6 +255,7 @@ pub async fn run(mut s: Session) -> Result<String> {
         host_name: welcome.host_name.clone(),
         width: welcome.width,
         height: welcome.height,
+        codec: welcome.codec,
     });
 
     let mut video = conn.accept_uni().await?;
@@ -203,9 +263,10 @@ pub async fn run(mut s: Session) -> Result<String> {
     let (frame_tx, frame_rx) = std_mpsc::sync_channel::<VideoFrame>(4);
     {
         let (frames, proxy, tx) = (s.frames.clone(), s.proxy.clone(), s.outgoing_tx.clone());
+        let codec = welcome.codec;
         std::thread::Builder::new()
             .name("decoder".into())
-            .spawn(move || decode::run(frame_rx, &frames, &proxy, &tx))?;
+            .spawn(move || decode::run(codec, frame_rx, frames, proxy, &tx))?;
     }
 
     let reader = async {
@@ -233,13 +294,41 @@ pub async fn run(mut s: Session) -> Result<String> {
         }
         anyhow::Ok(())
     };
+    let notices = async {
+        while let Some(msg) = read_msg::<HostMsg>(&mut recv).await? {
+            if let HostMsg::Notice { message } = msg {
+                tracing::warn!("host says: {message}");
+                eprintln!("Host says: {message}");
+            }
+        }
+        // The host finished its side of the control stream; video may still be flowing.
+        std::future::pending::<()>().await;
+        anyhow::Ok(())
+    };
 
     tokio::select! {
         r = reader => r.map(|()| "host stopped streaming".to_string()),
         r = writer => r.map(|()| "closed".to_string()),
+        r = notices => r.map(|()| "closed".to_string()),
         e = conn.closed() => Ok(match e {
             quinn::ConnectionError::ApplicationClosed(c) => String::from_utf8_lossy(&c.reason).into_owned(),
             other => other.to_string(),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ranks_usable_addresses() {
+        let ips: Vec<IpAddr> =
+            ["fe80::1", "::1", "127.0.0.1", "2001:db8::5", "169.254.3.4", "192.168.0.25", "100.64.1.2"]
+                .iter()
+                .map(|s| s.parse().unwrap())
+                .collect();
+        let ranked: Vec<String> = rank_addresses(ips, 47800).iter().map(SocketAddr::to_string).collect();
+        assert_eq!(ranked, ["192.168.0.25:47800", "100.64.1.2:47800", "169.254.3.4:47800", "[2001:db8::5]:47800"]);
     }
 }

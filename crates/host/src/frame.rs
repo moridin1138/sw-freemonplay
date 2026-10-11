@@ -116,6 +116,11 @@ impl FrameSlot {
         self.cv.notify_one();
     }
 
+    /// Whether capture has delivered at least one frame.
+    pub fn has_frame(&self) -> bool {
+        self.state.lock().unwrap().latest.is_some()
+    }
+
     pub fn close(&self) {
         self.state.lock().unwrap().closed = true;
         self.cv.notify_all();
