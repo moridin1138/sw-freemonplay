@@ -267,11 +267,30 @@ impl Controller {
         }
         for s in sessions {
             let rate = if s.fps > 0.0 { format!(", {:.0} fps, {:.1} Mbit/s", s.fps, s.mbps) } else { String::new() };
-            let title = format!("{}: {}×{} {}{rate}", s.client_name, s.width, s.height, s.codec);
+            let latency = s.latency_ms().map(|ms| format!(", ~{ms:.0} ms")).unwrap_or_default();
+            let title = format!("{}: {}×{} {}{rate}{latency}", s.client_name, s.width, s.height, s.codec);
             let details = NSMenu::new(self.mtm());
             details.setAutoenablesItems(false);
             details.addItem(&self.item(&format!("Address: {}", s.addr.ip().to_canonical()), None, 0));
             details.addItem(&self.item(&format!("Encoder: {}", s.encoder), None, 0));
+            details.addItem(&NSMenuItem::separatorItem(self.mtm()));
+            match (s.latency_ms(), s.client) {
+                (Some(total), Some(client)) => {
+                    let lines = [
+                        format!("Latency: about {total:.0} ms"),
+                        format!("    This Mac (capture to sent): {:.1} ms", s.host_ms),
+                        format!("    Network (half the {:.1} ms round trip): {:.1} ms", s.rtt_ms, s.rtt_ms / 2.0),
+                        format!("    Screen (received to shown): {:.1} ms", client.display_ms),
+                        format!("Screen is showing {:.0} fps", client.shown_fps),
+                    ];
+                    for line in lines {
+                        details.addItem(&self.item(&line, None, 0));
+                    }
+                    let note = self.item("Plus up to one refresh while the screen waits to display.", None, 0);
+                    details.addItem(&note);
+                }
+                _ => details.addItem(&self.item("Latency: waiting for the screen's first report", None, 0)),
+            }
             details.addItem(&NSMenuItem::separatorItem(self.mtm()));
             details.addItem(&self.item("Disconnect", Some(sel!(disconnect:)), s.id as isize));
             let entry = self.item(&title, Some(sel!(tick:)), 0);

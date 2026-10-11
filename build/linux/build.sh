@@ -6,6 +6,11 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 image=freemonplay-linux-build
 
+if ! docker info >/dev/null 2>&1; then
+    echo "Docker isn't running. Start Docker Desktop (open -a Docker) and run this again." >&2
+    exit 1
+fi
+
 docker build --platform linux/amd64 -t "$image" build/linux
 docker run --rm --platform linux/amd64 \
     -v "$PWD":/src \

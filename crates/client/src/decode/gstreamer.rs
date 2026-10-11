@@ -36,15 +36,11 @@ pub fn supported_codecs() -> Vec<Codec> {
     }
 }
 
-/// The host sends 60 fps at most; timestamps only need to be increasing.
-const FRAME_DURATION_US: u64 = 16_667;
-
 pub struct GstDecoder {
     pipeline: gst::Pipeline,
     src: AppSrc,
     codec: Codec,
     element: &'static str,
-    pts_us: u64,
 }
 
 impl GstDecoder {
@@ -93,7 +89,7 @@ impl GstDecoder {
                 .build(),
         );
         pipeline.set_state(gst::State::Playing).context("GStreamer pipeline wouldn't start")?;
-        Ok(Self { pipeline, src, codec, element, pts_us: 0 })
+        Ok(Self { pipeline, src, codec, element })
     }
 
     /// Returns the first error the pipeline has reported since the last call, if any.
@@ -120,14 +116,14 @@ impl Decoder for GstDecoder {
         format!("GStreamer {} {} ({kind})", self.codec, self.element)
     }
 
-    fn decode(&mut self, access_unit: &[u8]) -> Result<()> {
+    fn decode(&mut self, access_unit: &[u8], pts_us: u64) -> Result<()> {
         if let Some(error) = self.take_error() {
             self.restart();
             bail!("GStreamer: {error}");
         }
         let mut buffer = gst::Buffer::from_slice(access_unit.to_vec());
-        buffer.get_mut().context("fresh buffer is writable")?.set_pts(gst::ClockTime::from_useconds(self.pts_us));
-        self.pts_us += FRAME_DURATION_US;
+        // The host's timestamps; GStreamer carries them through to the decoded sample.
+        buffer.get_mut().context("fresh buffer is writable")?.set_pts(gst::ClockTime::from_useconds(pts_us));
         self.src.push_buffer(buffer).map_err(|e| anyhow!("pushing to GStreamer: {e:?}"))?;
         Ok(())
     }
@@ -155,5 +151,6 @@ fn to_yuv(sample: &gst::Sample) -> Option<YuvFrame> {
         },
         _ => return None,
     };
-    Some(YuvFrame { width: info.width(), height: info.height(), planes })
+    let pts_us = sample.buffer()?.pts().map_or(0, |t| t.useconds());
+    Some(YuvFrame { width: info.width(), height: info.height(), planes, pts_us, received_at: None })
 }

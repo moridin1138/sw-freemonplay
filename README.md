@@ -62,9 +62,17 @@ On the Mac that wants more screens, install the menu bar app:
 ./build/macos/bundle.sh --install
 ```
 
-Then open **freemonplay** from Launchpad or Spotlight. It lives in the menu bar (no Dock icon) and shows the pairing code, connected screens with live stats and a Disconnect option for each, plus the codec, frame rate and input settings, Open at Login and the log. Install it to /Applications as above: macOS can stall apps that run from inside Documents, Desktop or Downloads behind file-access prompts.
+Then open **freemonplay** from Launchpad or Spotlight. It lives in the menu bar (no Dock icon) and shows the pairing code, connected screens with live stats (frame rate, bitrate and estimated latency, with a breakdown per screen) and a Disconnect option for each, plus the codec, frame rate and input settings, Open at Login and the log. Install it to /Applications as above: macOS can stall apps that run from inside Documents, Desktop or Downloads behind file-access prompts.
 
 On MacBooks with a notch, menu bar icons that don't fit are hidden behind it. If you can't see the freemonplay icon, open freemonplay again (from Spotlight or Launchpad) and its menu appears at the pointer, or Cmd-drag other icons to make room.
+
+**Keep permissions across rebuilds (once per Mac):** macOS ties Screen Recording and Accessibility permissions to the app's signature. By default the app gets a throwaway (ad-hoc) signature, so every rebuild needs the permissions re-enabled. Create a local signing identity once and `bundle.sh` uses it automatically:
+
+```bash
+./build/macos/make-signing-identity.sh
+```
+
+It adds a self-signed "freemonplay Local Signing" certificate to your login keychain and asks for your password to trust it for code signing. It only affects apps you build on this Mac. Grant the permissions one more time after the first signed build; after that they stick.
 
 You can also run it in a terminal, which prints the pairing code:
 
@@ -92,6 +100,7 @@ Useful options:
 | `client --windowed 1280x800` | Run in a window instead of full screen |
 | `client --monitor 1` | Fill a different monitor |
 | `client --scale 2` | Force Retina-style 2x rendering (`auto` uses it on high-density screens) |
+| `client --no-vsync` | Show frames without waiting for the display refresh: up to one refresh (about 16 ms at 60 Hz) less latency, but can tear |
 | `host --max-fps 30 --bitrate-mbps 8` | Lower bandwidth |
 | `host --encoder software` | Force the OpenH264 software encoder (default `auto` prefers hardware) |
 | `host --codec h264` / `client --codec h264` | Limit to one codec (default `auto` negotiates; see below) |
@@ -120,6 +129,7 @@ crates/
 
 - **Codecs:** the client lists the codecs it can decode, preferred first, and the host picks the first it can encode. Clients put HEVC first only when their GPU decodes it (HEVC is about 40% smaller than H.264 for the same quality, but costs more CPU in software). Hosts without a hardware HEVC encoder fall back to H.264.
 - **Transport:** one QUIC connection per screen (`quinn`). Client to host is a control stream (hello, input, keyframe requests). Host to client is a video stream of H.264 access units. Messages are length-prefixed `postcard`.
+- **Latency measurement:** each side times what it can on its own clock: the host from capture to sent, the client from received to shown, and QUIC tracks the round trip. The host adds them up (host + half the round trip + client) and shows the estimate in the menu. It leaves out capture's own delay and the wait for the client display's next refresh, so the real figure is somewhat higher.
 - **Latency:** the host keeps only the newest captured frame. If encoding or the network falls behind, frames are skipped *before* encoding, so the picture never queues up. The client does the same after decoding.
 - **Pairing:** the host has a self-signed certificate. A new client must send the host's pairing code; the host then issues a random token (it stores only its hash) and the client pins the host's certificate fingerprint. Five wrong codes rotate the code.
 - **Display identity:** each client gets a stable serial number, so macOS remembers where you arranged that screen.

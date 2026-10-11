@@ -98,7 +98,9 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(window: Arc<Window>) -> Result<Self> {
+    /// `vsync: false` presents immediately instead of at the next display refresh: up to one
+    /// refresh less latency, but the picture can tear (most visibly in full screen).
+    pub fn new(window: Arc<Window>, vsync: bool) -> Result<Self> {
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window.clone())?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -116,11 +118,16 @@ impl Renderer {
         let caps = surface.get_capabilities(&adapter);
         // Video is already gamma encoded, so prefer a non-sRGB surface and write it as is.
         let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(caps.formats[0]);
-        let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+        tracing::debug!("present modes available: {:?}", caps.present_modes);
+        let present_mode = if !vsync && caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
+            wgpu::PresentMode::Immediate
+        } else if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+            // Still waits for vsync, but never blocks us behind an older frame.
             wgpu::PresentMode::Mailbox
         } else {
             wgpu::PresentMode::Fifo
         };
+        tracing::debug!("using present mode {present_mode:?}");
         let size = window.inner_size();
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,

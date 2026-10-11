@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use fmp_proto::Codec;
+use fmp_proto::{ClientStats, Codec};
 
 use crate::platform::Activity;
 
@@ -21,6 +21,19 @@ pub struct SessionInfo {
     pub encoder: &'static str,
     pub fps: f32,
     pub mbps: f32,
+    /// Capture to sent on this Mac (encode + queueing), ms.
+    pub host_ms: f32,
+    pub rtt_ms: f32,
+    /// Latest report from the client, once one has arrived.
+    pub client: Option<ClientStats>,
+}
+
+impl SessionInfo {
+    /// Estimated capture-to-shown latency: host + half the round trip + client. Doesn't
+    /// include capture's own delay or waiting for the client display's next refresh.
+    pub fn latency_ms(&self) -> Option<f32> {
+        self.client.map(|c| self.host_ms + self.rtt_ms / 2.0 + c.display_ms)
+    }
 }
 
 struct Entry {
@@ -71,10 +84,22 @@ pub struct SessionGuard {
 }
 
 impl SessionGuard {
-    pub fn update_stats(&self, fps: f32, mbps: f32) {
+    pub fn update_stats(&self, fps: f32, mbps: f32, host_ms: f32, rtt_ms: f32) {
+        self.update(|info| {
+            info.fps = fps;
+            info.mbps = mbps;
+            info.host_ms = host_ms;
+            info.rtt_ms = rtt_ms;
+        });
+    }
+
+    pub fn update_client(&self, stats: ClientStats) {
+        self.update(|info| info.client = Some(stats));
+    }
+
+    fn update(&self, change: impl FnOnce(&mut SessionInfo)) {
         if let Some(entry) = self.registry.sessions.lock().unwrap().get_mut(&self.id) {
-            entry.info.fps = fps;
-            entry.info.mbps = mbps;
+            change(&mut entry.info);
         }
     }
 }

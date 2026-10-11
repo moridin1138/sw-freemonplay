@@ -45,7 +45,6 @@ pub struct MfDecoder {
     /// The part that is actual picture (e.g. 1080 rows).
     visible: (u32, u32),
     default_stride: u32,
-    sample_time: i64,
     deliver: Deliver,
     // Kept alive for as long as the decoder uses it.
     _device_manager: Option<IMFDXGIDeviceManager>,
@@ -103,7 +102,6 @@ impl MfDecoder {
                 coded: (0, 0),
                 visible: (0, 0),
                 default_stride: 0,
-                sample_time: 0,
                 deliver,
                 _device_manager: device_manager,
             };
@@ -186,10 +184,18 @@ impl MfDecoder {
         // SAFETY: locked reads within the plane sizes MF reports, unlocked afterwards.
         unsafe {
             let buffer = sample.GetBufferByIndex(0)?;
+            // We set sample times to the host's timestamp (in 100 ns units) on input.
+            let pts_us = (sample.GetSampleTime().unwrap_or(0) / 10).max(0) as u64;
             let copy = |base: *const u8, pitch: usize| {
                 let y = std::slice::from_raw_parts(base, pitch * h as usize).to_vec();
                 let uv = std::slice::from_raw_parts(base.add(pitch * coded_h), pitch * h.div_ceil(2) as usize).to_vec();
-                YuvFrame { width: w, height: h, planes: Planes::Nv12 { y, uv, y_stride: pitch as u32, uv_stride: pitch as u32 } }
+                YuvFrame {
+                    width: w,
+                    height: h,
+                    planes: Planes::Nv12 { y, uv, y_stride: pitch as u32, uv_stride: pitch as u32 },
+                    pts_us,
+                    received_at: None,
+                }
             };
             if let Ok(buffer2d) = buffer.cast::<IMF2DBuffer>() {
                 let mut base = null_mut();
@@ -218,7 +224,7 @@ impl Decoder for MfDecoder {
         format!("Media Foundation {} ({kind})", self.codec)
     }
 
-    fn decode(&mut self, access_unit: &[u8]) -> Result<()> {
+    fn decode(&mut self, access_unit: &[u8], pts_us: u64) -> Result<()> {
         // SAFETY: a memory buffer of exactly `len` bytes, filled while locked, wrapped in a
         // sample and handed to the decoder (which takes its own reference).
         let sample = unsafe {
@@ -231,9 +237,8 @@ impl Decoder for MfDecoder {
             buffer.SetCurrentLength(len)?;
             let sample = MFCreateSample()?;
             sample.AddBuffer(&buffer)?;
-            // 100 ns units; only needs to increase.
-            sample.SetSampleTime(self.sample_time)?;
-            self.sample_time += 166_667;
+            // 100 ns units. Carries the host's timestamp through to the decoded picture.
+            sample.SetSampleTime(pts_us as i64 * 10)?;
             sample
         };
         // SAFETY: feeding our transform; NOTACCEPTING means drain first, then retry once.

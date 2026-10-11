@@ -6,7 +6,9 @@
 //! - Windows: Media Foundation, with DXVA hardware decoding when a D3D11 GPU is available
 //! - Linux: GStreamer, preferring the VAAPI hardware decoder; bundled OpenH264 as a last resort
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, mpsc};
+use std::time::Instant;
 
 use anyhow::Result;
 use fmp_proto::{ClientMsg, Codec, VideoFrame};
@@ -30,6 +32,10 @@ pub struct YuvFrame {
     pub width: u32,
     pub height: u32,
     pub planes: Planes,
+    /// The source frame's timestamp, carried through the decoder.
+    pub pts_us: u64,
+    /// When the source frame finished arriving (filled in by `run`), for latency stats.
+    pub received_at: Option<Instant>,
 }
 
 pub enum Planes {
@@ -45,8 +51,9 @@ pub type Deliver = Arc<dyn Fn(YuvFrame) + Send + Sync>;
 
 pub trait Decoder {
     fn name(&self) -> String;
-    /// Feeds one access unit (Annex-B). Pictures come out through `Deliver`, possibly later.
-    fn decode(&mut self, access_unit: &[u8]) -> Result<()>;
+    /// Feeds one access unit (Annex-B). Pictures come out through `Deliver`, possibly later,
+    /// carrying `pts_us` so they can be matched back to their source frame.
+    fn decode(&mut self, access_unit: &[u8], pts_us: u64) -> Result<()>;
 }
 
 /// Codecs this machine can decode, most preferred first. HEVC goes first only when the
@@ -102,15 +109,26 @@ impl FrameSlot {
 /// reading video until then. Starting can take seconds, e.g. GStreamer's first-run plugin scan.
 pub fn run(
     codec: Codec,
-    frames: mpsc::Receiver<VideoFrame>,
+    frames: mpsc::Receiver<(VideoFrame, Instant)>,
     slot: Arc<FrameSlot>,
     proxy: EventLoopProxy<UserEvent>,
     outgoing: &UnboundedSender<ClientMsg>,
     ready: tokio::sync::oneshot::Sender<()>,
 ) {
+    // Arrival times of frames in the decoder, matched to pictures by timestamp.
+    let arrivals: Arc<Mutex<VecDeque<(u64, Instant)>>> = Arc::default();
     let deliver: Deliver = {
-        let proxy = proxy.clone();
-        Arc::new(move |picture| {
+        let (proxy, arrivals) = (proxy.clone(), arrivals.clone());
+        Arc::new(move |mut picture: YuvFrame| {
+            let mut arrivals = arrivals.lock().unwrap();
+            // Anything older than this picture was dropped by the decoder.
+            while arrivals.front().is_some_and(|&(pts, _)| pts < picture.pts_us) {
+                arrivals.pop_front();
+            }
+            if arrivals.front().is_some_and(|&(pts, _)| pts == picture.pts_us) {
+                picture.received_at = arrivals.pop_front().map(|(_, at)| at);
+            }
+            drop(arrivals);
             if slot.put(picture) {
                 let _ = proxy.send_event(UserEvent::Frame);
             }
@@ -126,8 +144,16 @@ pub fn run(
     tracing::info!("decoding with {}", decoder.name());
     let _ = ready.send(());
     let _ = outgoing.send(ClientMsg::RequestKeyframe);
-    for frame in frames {
-        match decoder.decode(&frame.data) {
+    for (frame, received_at) in frames {
+        {
+            let mut arrivals = arrivals.lock().unwrap();
+            arrivals.push_back((frame.pts_us, received_at));
+            // Bound it in case a decoder never reports some frames.
+            if arrivals.len() > 120 {
+                arrivals.pop_front();
+            }
+        }
+        match decoder.decode(&frame.data, frame.pts_us) {
             Ok(()) => {}
             Err(e) => {
                 tracing::warn!("decode error ({e:#}), asking for a keyframe");

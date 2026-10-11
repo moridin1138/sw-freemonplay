@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
-use fmp_proto::{Auth, ClientMsg, Codec, DisplayRequest, InputEvent, TouchPhase};
+use fmp_proto::{Auth, ClientMsg, ClientStats, Codec, DisplayRequest, InputEvent, TouchPhase};
 use tokio::sync::{mpsc, oneshot};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -53,6 +53,10 @@ struct Args {
     /// hardware, with H.264 as the fallback.
     #[arg(long, value_enum, default_value_t = CodecArg::Auto)]
     codec: CodecArg,
+    /// Show frames as soon as they're decoded instead of at the display's next refresh.
+    /// Saves up to one refresh of latency (about 16 ms at 60 Hz) but the picture can tear.
+    #[arg(long)]
+    no_vsync: bool,
     /// Name this screen shows up as on the host. Defaults to this computer's hostname.
     #[arg(long)]
     name: Option<String>,
@@ -157,6 +161,7 @@ fn main() -> Result<()> {
         monitor: args.monitor,
         windowed,
         scale: args.scale,
+        vsync: !args.no_vsync,
         host_label: target.name,
         display_tx: Some(display_tx),
         out: out_tx,
@@ -167,7 +172,7 @@ fn main() -> Result<()> {
         modifiers: ModifiersState::empty(),
         held_keys: HashSet::new(),
         exit_reason: None,
-        shown: (0, std::time::Instant::now()),
+        shown: ShownStats::new(),
     };
     event_loop.run_app(&mut app)?;
     rt.shutdown_timeout(Duration::from_millis(200));
@@ -206,6 +211,7 @@ struct App {
     monitor: Option<usize>,
     windowed: Option<(u32, u32)>,
     scale: Scale,
+    vsync: bool,
     host_label: String,
     display_tx: Option<oneshot::Sender<DisplayRequest>>,
     out: mpsc::UnboundedSender<ClientMsg>,
@@ -217,7 +223,7 @@ struct App {
     modifiers: ModifiersState,
     held_keys: HashSet<u16>,
     exit_reason: Option<String>,
-    shown: (u32, std::time::Instant),
+    shown: ShownStats,
 }
 
 impl App {
@@ -229,6 +235,22 @@ impl App {
         let video = self.video?;
         let size = self.window.as_ref()?.inner_size();
         Some(input::normalize((x, y), video, (size.width, size.height)))
+    }
+
+    /// Uploads the newest decoded picture, if any, and presents.
+    fn draw(&mut self) {
+        let Some(r) = &mut self.renderer else { return };
+        match self.frames.take() {
+            Some(frame) => {
+                r.upload(&frame);
+                r.render();
+                self.shown.add(frame.received_at.map(|at| at.elapsed()));
+                if let Some(stats) = self.shown.take_report() {
+                    let _ = self.out.send(ClientMsg::Stats(stats));
+                }
+            }
+            None => r.render(),
+        }
     }
 
     fn release_all_keys(&mut self) {
@@ -276,7 +298,7 @@ impl App {
         let window = Arc::new(event_loop.create_window(attrs)?);
         // The host draws its cursor into the video; a second local one would just be confusing.
         window.set_cursor_visible(false);
-        self.renderer = Some(Renderer::new(window.clone())?);
+        self.renderer = Some(Renderer::new(window.clone(), self.vsync)?);
         self.window = Some(window);
 
         let request = DisplayRequest { width, height, refresh_hz, hidpi, size_mm: None };
@@ -306,11 +328,9 @@ impl ApplicationHandler<UserEvent> for App {
                     w.set_title(&format!("freemonplay: {host_name}"));
                 }
             }
-            UserEvent::Frame => {
-                if let Some(w) = &self.window {
-                    w.request_redraw();
-                }
-            }
+            // Draw right away: request_redraw would wait for the next display refresh tick,
+            // adding up to a frame of latency.
+            UserEvent::Frame => self.draw(),
             UserEvent::Closed(reason) => self.fail(event_loop, reason),
         }
     }
@@ -326,20 +346,7 @@ impl ApplicationHandler<UserEvent> for App {
                     w.request_redraw();
                 }
             }
-            WindowEvent::RedrawRequested => {
-                if let Some(r) = &mut self.renderer {
-                    if let Some(frame) = self.frames.take() {
-                        r.upload(&frame);
-                        self.shown.0 += 1;
-                        let secs = self.shown.1.elapsed().as_secs_f64();
-                        if secs >= 5.0 {
-                            tracing::debug!("showing {:.0} fps", self.shown.0 as f64 / secs);
-                            self.shown = (0, std::time::Instant::now());
-                        }
-                    }
-                    r.render();
-                }
-            }
+            WindowEvent::RedrawRequested => self.draw(),
             WindowEvent::Focused(false) => self.release_all_keys(),
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::KeyboardInput { event, .. } => {
@@ -404,6 +411,48 @@ impl ApplicationHandler<UserEvent> for App {
             }
             _ => {}
         }
+    }
+}
+
+/// Frames shown and their received-to-shown time, reported to the host every 2 s and
+/// logged every 10 s.
+struct ShownStats {
+    since: std::time::Instant,
+    frames: u32,
+    timed: u32,
+    total: Duration,
+    reports: u32,
+}
+
+impl ShownStats {
+    fn new() -> Self {
+        Self { since: std::time::Instant::now(), frames: 0, timed: 0, total: Duration::ZERO, reports: 0 }
+    }
+
+    fn add(&mut self, received_to_shown: Option<Duration>) {
+        self.frames += 1;
+        if let Some(d) = received_to_shown {
+            self.timed += 1;
+            self.total += d;
+        }
+    }
+
+    fn take_report(&mut self) -> Option<ClientStats> {
+        let secs = self.since.elapsed().as_secs_f64();
+        if secs < 2.0 || self.timed == 0 {
+            return None;
+        }
+        let stats = ClientStats {
+            shown_fps: (self.frames as f64 / secs) as f32,
+            display_ms: (self.total.as_secs_f64() * 1e3 / self.timed as f64) as f32,
+            rtt_ms: 0.0, // filled in by the network side
+        };
+        self.reports += 1;
+        if self.reports % 5 == 0 {
+            tracing::info!("showing {:.0} fps, {:.1} ms from received to shown", stats.shown_fps, stats.display_ms);
+        }
+        *self = Self { reports: self.reports, ..Self::new() };
+        Some(stats)
     }
 }
 

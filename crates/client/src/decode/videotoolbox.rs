@@ -61,7 +61,7 @@ impl Decoder for VtDecoder {
         format!("VideoToolbox {} (hardware)", self.codec)
     }
 
-    fn decode(&mut self, access_unit: &[u8]) -> Result<()> {
+    fn decode(&mut self, access_unit: &[u8], pts_us: u64) -> Result<()> {
         let mut params_changed = false;
         let mut slices = Vec::new();
         let param_types = self.codec.parameter_set_types();
@@ -85,7 +85,8 @@ impl Decoder for VtDecoder {
         if slices.is_empty() {
             return Ok(());
         }
-        if let Some(picture) = session.decode(&slices)? {
+        if let Some(mut picture) = session.decode(&slices)? {
+            picture.pts_us = pts_us;
             (self.deliver)(picture);
         }
         Ok(())
@@ -261,6 +262,8 @@ unsafe fn copy_nv12(pb: &CVImageBuffer) -> Option<YuvFrame> {
                 width: CVPixelBufferGetWidthOfPlane(pb, 0) as u32,
                 height: CVPixelBufferGetHeightOfPlane(pb, 0) as u32,
                 planes: Planes::Nv12 { y, uv, y_stride, uv_stride },
+                pts_us: 0,
+                received_at: None,
             }),
             _ => None,
         };

@@ -6,8 +6,9 @@
 # Run it from /Applications: macOS guards apps that live inside Documents, Desktop or
 # Downloads, and can stall them behind "access files in your Documents folder" prompts.
 #
-# The app is ad-hoc signed. macOS ties Screen Recording and Accessibility permissions to
-# the signature, so after rebuilding you may need to re-enable them in System Settings.
+# Signing: macOS ties Screen Recording and Accessibility permissions to the signature. With
+# the "freemonplay Local Signing" identity (create it once with make-signing-identity.sh)
+# they survive rebuilds; with the ad-hoc fallback you re-enable them after each rebuild.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -57,7 +58,14 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign - --identifier com.forwardedu.freemonplay "$app"
+identity="freemonplay Local Signing"
+if security find-identity -p codesigning 2>/dev/null | grep -q "\"$identity\""; then
+    codesign --force --sign "$identity" --identifier com.forwardedu.freemonplay "$app"
+    echo "Signed with \"$identity\""
+else
+    codesign --force --sign - --identifier com.forwardedu.freemonplay "$app"
+    echo "Ad-hoc signed. Permissions reset on each rebuild; run build/macos/make-signing-identity.sh once to fix that."
+fi
 echo "Built $app"
 
 if [[ "${1:-}" == "--install" ]]; then

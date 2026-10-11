@@ -21,7 +21,7 @@ impl Decoder for SoftwareDecoder {
         "OpenH264 (software, bundled)".into()
     }
 
-    fn decode(&mut self, access_unit: &[u8]) -> Result<()> {
+    fn decode(&mut self, access_unit: &[u8], pts_us: u64) -> Result<()> {
         let Some(yuv) = self.decoder.decode(access_unit)? else { return Ok(()) };
         let (w, h) = yuv.dimensions();
         let (sy, su, _) = yuv.strides();
@@ -36,6 +36,8 @@ impl Decoder for SoftwareDecoder {
                 y_stride: sy as u32,
                 uv_stride: su as u32,
             },
+            pts_us,
+            received_at: None,
         });
         Ok(())
     }

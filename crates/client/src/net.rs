@@ -260,7 +260,7 @@ pub async fn run(mut s: Session) -> Result<String> {
 
     let mut video = conn.accept_uni().await?;
     // Small queue: if decoding can't keep up we'd rather skip ahead to a keyframe than lag.
-    let (frame_tx, frame_rx) = std_mpsc::sync_channel::<VideoFrame>(4);
+    let (frame_tx, frame_rx) = std_mpsc::sync_channel::<(VideoFrame, Instant)>(4);
     let (ready_tx, ready_rx) = oneshot::channel();
     {
         let (frames, proxy, tx) = (s.frames.clone(), s.proxy.clone(), s.outgoing_tx.clone());
@@ -283,7 +283,7 @@ pub async fn run(mut s: Session) -> Result<String> {
                 continue;
             }
             waiting_for_keyframe = false;
-            match frame_tx.try_send(frame) {
+            match frame_tx.try_send((frame, Instant::now())) {
                 Ok(()) => {}
                 Err(std_mpsc::TrySendError::Full(_)) => {
                     tracing::debug!("decoder behind, skipping to next keyframe");
@@ -296,7 +296,11 @@ pub async fn run(mut s: Session) -> Result<String> {
         anyhow::Ok(())
     };
     let writer = async {
-        while let Some(msg) = s.outgoing.recv().await {
+        while let Some(mut msg) = s.outgoing.recv().await {
+            // The UI measures display latency; the network side knows the round trip.
+            if let ClientMsg::Stats(stats) = &mut msg {
+                stats.rtt_ms = (conn.rtt().as_secs_f64() * 1e3) as f32;
+            }
             write_msg(&mut send, &msg).await?;
         }
         anyhow::Ok(())

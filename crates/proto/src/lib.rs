@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub mod hid;
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 pub const ALPN: &[u8] = b"freemonplay/1";
 pub const SERVICE_TYPE: &str = "_freemonplay._udp.local.";
 pub const DEFAULT_PORT: u16 = 47800;
@@ -28,6 +28,20 @@ pub enum ClientMsg {
     Input(InputEvent),
     /// The decoder lost sync (or just started) and needs an IDR frame.
     RequestKeyframe,
+    /// Sent every couple of seconds so the host can show latency and frame rate.
+    Stats(ClientStats),
+}
+
+/// What the client measured over the last reporting window, on its own clock.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct ClientStats {
+    /// Pictures actually shown per second.
+    pub shown_fps: f32,
+    /// Average time from a frame fully arriving to it being presented (decode, upload,
+    /// present), in milliseconds. Excludes waiting for the display's next refresh.
+    pub display_ms: f32,
+    /// The client's view of the network round-trip time, in milliseconds.
+    pub rtt_ms: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

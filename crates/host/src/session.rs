@@ -223,11 +223,15 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
             encoder: encoder.name(),
             fps: 0.0,
             mbps: 0.0,
+            host_ms: 0.0,
+            rtt_ms: 0.0,
+            client: None,
         },
         conn.clone(),
     );
 
-    let (tx, mut rx) = mpsc::channel::<VideoFrame>(2);
+    // Frames travel with their capture time, to measure capture-to-sent latency.
+    let (tx, mut rx) = mpsc::channel::<(VideoFrame, Instant)>(2);
     let encoder = {
         let slot = slot.clone();
         std::thread::Builder::new().name("encoder".into()).spawn(move || encode_loop(&slot, encoder, tx))?
@@ -237,13 +241,14 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         let mut stats = Stats::new();
         let started = Instant::now();
         let mut first = true;
-        while let Some(frame) = rx.recv().await {
+        while let Some((frame, captured_at)) = rx.recv().await {
             if std::mem::take(&mut first) {
                 tracing::info!("{who}: first frame sent after {} ms", started.elapsed().as_millis());
             }
-            stats.add(frame.data.len());
+            let bytes = frame.data.len();
             write_msg(&mut video, &frame).await?;
-            stats.maybe_report(&who, &session);
+            stats.add(bytes, captured_at.elapsed());
+            stats.maybe_report(&who, &session, conn.rtt());
         }
         anyhow::Ok(())
     };
@@ -253,6 +258,10 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
                 None => return anyhow::Ok(()),
                 Some(ClientMsg::Input(event)) if ctx.settings().allow_input => source.inject(&event),
                 Some(ClientMsg::RequestKeyframe) => slot.request_keyframe(),
+                Some(ClientMsg::Stats(stats)) => {
+                    session.update_client(stats);
+                    tracing::debug!("{who}: screen reports {stats:?}");
+                }
                 Some(_) => {}
             }
         }
@@ -362,7 +371,11 @@ fn serial_for(client_id: &str) -> u32 {
     client_id.bytes().fold(0x811c_9dc5u32, |h, b| (h ^ b as u32).wrapping_mul(0x0100_0193))
 }
 
-fn encode_loop(slot: &FrameSlot, mut encoder: Box<dyn VideoEncoder>, tx: mpsc::Sender<VideoFrame>) -> Result<()> {
+fn encode_loop(
+    slot: &FrameSlot,
+    mut encoder: Box<dyn VideoEncoder>,
+    tx: mpsc::Sender<(VideoFrame, Instant)>,
+) -> Result<()> {
     crate::platform::prioritize_current_thread();
     let start = Instant::now();
     let mut need_keyframe = true;
@@ -373,45 +386,51 @@ fn encode_loop(slot: &FrameSlot, mut encoder: Box<dyn VideoEncoder>, tx: mpsc::S
         };
         let Some(out) = encoder.encode(&frame, keyframe || need_keyframe)? else { continue };
         need_keyframe = false;
+        let captured_at = frame.captured_at();
         let video = VideoFrame {
-            pts_us: frame.captured_at().saturating_duration_since(start).as_micros() as u64,
+            pts_us: captured_at.saturating_duration_since(start).as_micros() as u64,
             keyframe: out.keyframe,
             data: out.data,
         };
         // Blocks while the network is behind; meanwhile the slot keeps only the newest frame.
-        if tx.blocking_send(video).is_err() {
+        if tx.blocking_send((video, captured_at)).is_err() {
             return Ok(());
         }
     }
 }
 
-/// Frame rate and bitrate over 2 s windows: shown live in the menu, logged every 10 s.
+/// Frame rate, bitrate and capture-to-sent time over 2 s windows: shown live in the menu,
+/// logged every 10 s.
 struct Stats {
     since: Instant,
     frames: u32,
     bytes: usize,
+    host_latency: Duration,
     windows: u32,
 }
 
 impl Stats {
     fn new() -> Self {
-        Self { since: Instant::now(), frames: 0, bytes: 0, windows: 0 }
+        Self { since: Instant::now(), frames: 0, bytes: 0, host_latency: Duration::ZERO, windows: 0 }
     }
-    fn add(&mut self, bytes: usize) {
+    fn add(&mut self, bytes: usize, host_latency: Duration) {
         self.frames += 1;
         self.bytes += bytes;
+        self.host_latency += host_latency;
     }
-    fn maybe_report(&mut self, who: &str, session: &SessionGuard) {
+    fn maybe_report(&mut self, who: &str, session: &SessionGuard, rtt: Duration) {
         let secs = self.since.elapsed().as_secs_f64();
         if secs < 2.0 {
             return;
         }
         let fps = (self.frames as f64 / secs) as f32;
         let mbps = (self.bytes as f64 * 8.0 / secs / 1e6) as f32;
-        session.update_stats(fps, mbps);
+        let host_ms = (self.host_latency.as_secs_f64() * 1e3 / self.frames.max(1) as f64) as f32;
+        let rtt_ms = (rtt.as_secs_f64() * 1e3) as f32;
+        session.update_stats(fps, mbps, host_ms, rtt_ms);
         self.windows += 1;
         if self.windows % 5 == 0 {
-            tracing::info!("{who}: {fps:.0} fps, {mbps:.1} Mbit/s");
+            tracing::info!("{who}: {fps:.0} fps, {mbps:.1} Mbit/s, host {host_ms:.1} ms, round trip {rtt_ms:.1} ms");
         }
         *self = Self { windows: self.windows, ..Self::new() };
     }
