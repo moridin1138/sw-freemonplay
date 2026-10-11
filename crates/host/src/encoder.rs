@@ -33,7 +33,7 @@ pub enum EncoderChoice {
     Software,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, serde::Serialize, serde::Deserialize)]
 pub enum CodecChoice {
     /// Whatever the client prefers that this host can encode.
     Auto,

@@ -3,9 +3,13 @@
 
 mod encoder;
 mod frame;
+#[cfg(target_os = "macos")]
+mod menubar;
 mod pattern;
 mod platform;
+mod registry;
 mod session;
+mod settings;
 mod store;
 
 use std::net::{Ipv6Addr, SocketAddr};
@@ -17,7 +21,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use fmp_proto::{ALPN, DEFAULT_PORT, PROTOCOL_VERSION, SERVICE_TYPE};
 
-use session::Ctx;
+use session::{Ctx, Overrides};
 use store::HostStore;
 
 #[derive(Parser)]
@@ -29,19 +33,20 @@ struct Args {
     /// Name shown to clients. Defaults to this computer's hostname.
     #[arg(long)]
     name: Option<String>,
-    /// Frame rate cap. Each client also caps it at its own refresh rate.
-    #[arg(long, default_value_t = 60)]
-    max_fps: u32,
+    /// Frame rate cap (default 60). Each client also caps it at its own refresh rate.
+    /// Overrides the saved setting for this run.
+    #[arg(long)]
+    max_fps: Option<u32>,
     /// Video bitrate in Mbit/s. Defaults to a value based on resolution and frame rate.
     #[arg(long)]
     bitrate_mbps: Option<f64>,
     /// Video encoder.
     #[arg(long, value_enum, default_value_t = encoder::EncoderChoice::Auto)]
     encoder: encoder::EncoderChoice,
-    /// Video codec. Auto uses the client's preference (HEVC when it can decode it in
-    /// hardware) as long as this host can encode it.
-    #[arg(long, value_enum, default_value_t = encoder::CodecChoice::Auto)]
-    codec: encoder::CodecChoice,
+    /// Video codec (default auto: the client's preference, HEVC when it can decode it in
+    /// hardware, as long as this host can encode it). Overrides the saved setting.
+    #[arg(long, value_enum)]
+    codec: Option<encoder::CodecChoice>,
     /// Ignore mouse, keyboard and touch from clients (view only).
     #[arg(long)]
     no_input: bool,
@@ -58,25 +63,26 @@ struct Args {
     /// Needs no permissions and works on any OS.
     #[arg(long)]
     test_pattern: bool,
+    /// Run as a menu bar app. This is the default when launched as freemonplay.app.
+    #[arg(long, conflicts_with = "no_menubar")]
+    menubar: bool,
+    /// Run in the terminal even when launched from inside freemonplay.app.
+    #[arg(long)]
+    no_menubar: bool,
     /// Diagnostic: create a virtual display for a few seconds. Examples: 1920x1080,
     /// 2732x2048@2x (HiDPI), 1920x1080:30 (30 Hz).
     #[arg(long, value_name = "WxH")]
     probe_display: Option<String>,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,quinn=warn,mdns_sd=warn".into()),
-        )
-        .init();
+fn main() -> Result<()> {
     let args = Args::parse();
+    let gui = cfg!(target_os = "macos") && !args.no_menubar && (args.menubar || launched_from_app_bundle());
+    init_logging(gui)?;
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    if let Some(size) = args.probe_display {
-        return probe_display(&size);
+    if let Some(size) = &args.probe_display {
+        return probe_display(size);
     }
     if args.test_pattern {
         tracing::warn!("test pattern mode: clients get a generated picture, not a virtual display");
@@ -84,48 +90,77 @@ async fn main() -> Result<()> {
         platform::check_permissions()?;
     }
 
-    let store = HostStore::open(args.config_dir)?;
+    let store = HostStore::open(args.config_dir.clone())?;
     if args.forget_clients {
         store.forget_all()?;
         tracing::info!("forgot all paired clients");
     }
-    let host_name = args.name.unwrap_or_else(hostname);
+    let host_name = args.name.clone().unwrap_or_else(hostname);
 
-    let endpoint = make_endpoint(&store, args.port)?;
-    let port = endpoint.local_addr()?.port();
-    let _mdns = if args.no_mdns { None } else { Some(advertise(&store.host_id, &host_name, port)?) };
+    let rt = tokio::runtime::Runtime::new()?;
+    // quinn needs to be inside the runtime when the endpoint is created.
+    let endpoint = rt.block_on(async { make_endpoint(&store, args.port) })?;
+    let overrides = Overrides { max_fps: args.max_fps, codec: args.codec, no_input: args.no_input };
+    let bitrate = args.bitrate_mbps.map(|m| (m * 1e6) as u32);
+    let ctx = Arc::new(Ctx::new(store, host_name, endpoint, overrides, bitrate, args.encoder, args.test_pattern)?);
+    let _mdns = if args.no_mdns { None } else { Some(advertise(&ctx.store.host_id, &ctx.host_name, ctx.port)?) };
 
-    println!();
-    println!("  freemonplay host \"{host_name}\" listening on UDP port {port}");
-    println!("  Pairing code for new clients:  {}", store.pairing_code());
-    println!("  Host fingerprint: {}", &store.cert_fingerprint()[..16]);
-    println!();
-
-    let ctx = Arc::new(Ctx {
-        store,
-        host_name,
-        max_fps: args.max_fps.clamp(1, 240),
-        bitrate_bps: args.bitrate_mbps.map(|m| (m * 1e6) as u32),
-        encoder: args.encoder,
-        codec: args.codec.only(),
-        allow_input: !args.no_input,
-        test_pattern: args.test_pattern,
-    });
-
-    loop {
-        tokio::select! {
-            incoming = endpoint.accept() => {
-                let Some(incoming) = incoming else { break };
-                tracing::info!("{}: connecting", incoming.remote_address());
-                tokio::spawn(session::run(incoming, ctx.clone()));
-            }
-            _ = tokio::signal::ctrl_c() => break,
-        }
+    tracing::info!("freemonplay host \"{}\" listening on UDP port {}", ctx.host_name, ctx.port);
+    if !gui {
+        println!();
+        println!("  freemonplay host \"{}\" listening on UDP port {}", ctx.host_name, ctx.port);
+        println!("  Pairing code for new clients:  {}", ctx.store.pairing_code());
+        println!("  Host fingerprint: {}", &ctx.store.cert_fingerprint()[..16]);
+        println!();
     }
+    rt.spawn(accept_loop(ctx.clone()));
+
+    if gui {
+        #[cfg(target_os = "macos")]
+        menubar::run(ctx.clone(), log_path());
+    } else {
+        rt.block_on(async {
+            let _ = tokio::signal::ctrl_c().await;
+        });
+    }
+
     tracing::info!("shutting down");
-    endpoint.close(0u32.into(), b"host shutting down");
+    ctx.shutdown();
     // Let sessions see the close and drop their virtual displays.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    std::thread::sleep(Duration::from_millis(300));
+    Ok(())
+}
+
+async fn accept_loop(ctx: Arc<Ctx>) {
+    while let Some(incoming) = ctx.endpoint.accept().await {
+        tracing::info!("{}: connecting", incoming.remote_address());
+        tokio::spawn(session::run(incoming, ctx.clone()));
+    }
+}
+
+pub(crate) fn launched_from_app_bundle() -> bool {
+    std::env::current_exe().is_ok_and(|p| p.to_string_lossy().contains(".app/Contents/MacOS/"))
+}
+
+fn log_path() -> PathBuf {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    home.join("Library/Logs/freemonplay/host.log")
+}
+
+/// Terminal mode logs to stderr; the menu bar app (which has no terminal) to a file.
+fn init_logging(to_file: bool) -> Result<()> {
+    let filter = || {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| "info,quinn=warn,mdns_sd=warn".into())
+    };
+    if to_file {
+        let path = log_path();
+        std::fs::create_dir_all(path.parent().context("log path has no parent")?)?;
+        let file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        tracing_subscriber::fmt().with_env_filter(filter()).with_ansi(false).with_writer(std::sync::Mutex::new(file)).init();
+    } else {
+        tracing_subscriber::fmt().with_env_filter(filter()).init();
+    }
     Ok(())
 }
 

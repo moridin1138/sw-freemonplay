@@ -1,6 +1,6 @@
 //! One connected client: authenticate, create its virtual display, stream it, apply its input.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -12,23 +12,91 @@ use fmp_proto::{
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
-use crate::encoder::{EncoderChoice, VideoEncoder, default_bitrate, fit_stream_size};
+use crate::encoder::{CodecChoice, EncoderChoice, VideoEncoder, default_bitrate, fit_stream_size};
 use crate::frame::{FrameSlot, Next};
 use crate::pattern::Pattern;
 use crate::platform::{Capture, Injector, VirtualDisplay};
+use crate::registry::{Registry, SessionGuard, SessionInfo};
+use crate::settings::Settings;
 use crate::store::HostStore;
 
+/// Everything sessions share. Lives for the whole run.
 pub struct Ctx {
     pub store: HostStore,
     pub host_name: String,
-    pub max_fps: u32,
+    pub port: u16,
+    pub endpoint: quinn::Endpoint,
+    pub registry: Arc<Registry>,
+    /// Saved settings, changed from the menu bar. New sessions pick up changes.
+    settings: Mutex<Settings>,
+    /// From the command line; win over `settings` for this run and aren't saved.
+    pub overrides: Overrides,
     pub bitrate_bps: Option<u32>,
     pub encoder: EncoderChoice,
-    /// Only offer this codec (None: whatever the client prefers that we can encode).
-    pub codec: Option<Codec>,
-    pub allow_input: bool,
     /// Stream a generated test picture instead of a virtual display.
     pub test_pattern: bool,
+}
+
+#[derive(Default)]
+pub struct Overrides {
+    pub max_fps: Option<u32>,
+    pub codec: Option<CodecChoice>,
+    pub no_input: bool,
+}
+
+impl Ctx {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        store: HostStore,
+        host_name: String,
+        endpoint: quinn::Endpoint,
+        overrides: Overrides,
+        bitrate_bps: Option<u32>,
+        encoder: EncoderChoice,
+        test_pattern: bool,
+    ) -> anyhow::Result<Self> {
+        let settings = Settings::load(store.dir());
+        Ok(Self {
+            port: endpoint.local_addr()?.port(),
+            store,
+            host_name,
+            endpoint,
+            registry: Arc::default(),
+            settings: Mutex::new(settings),
+            overrides,
+            bitrate_bps,
+            encoder,
+            test_pattern,
+        })
+    }
+
+    /// Saved settings with command line overrides applied.
+    pub fn settings(&self) -> Settings {
+        let mut s = self.settings.lock().unwrap().clone();
+        if let Some(fps) = self.overrides.max_fps {
+            s.max_fps = fps;
+        }
+        if let Some(codec) = self.overrides.codec {
+            s.codec = codec;
+        }
+        if self.overrides.no_input {
+            s.allow_input = false;
+        }
+        s
+    }
+
+    /// Changes and saves the settings. Affects screens that connect afterwards (input
+    /// permission applies immediately).
+    pub fn update_settings(&self, change: impl FnOnce(&mut Settings)) {
+        let mut s = self.settings.lock().unwrap();
+        change(&mut s);
+        s.save(self.store.dir());
+    }
+
+    /// Disconnects everyone (unplugging their virtual displays) and stops accepting.
+    pub fn shutdown(&self) {
+        self.endpoint.close(0u32.into(), b"host shutting down");
+    }
 }
 
 /// Where a session's frames come from, and where its input goes.
@@ -91,11 +159,12 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     }
 
     let req = sanitize(hello.display);
-    let fps = ctx.max_fps.min(req.refresh_hz);
+    let settings = ctx.settings();
+    let fps = settings.max_fps.clamp(1, 240).min(req.refresh_hz);
     let (width, height) = fit_stream_size(req.width, req.height);
 
     let client_codecs = if hello.codecs.is_empty() { vec![Codec::H264] } else { hello.codecs.clone() };
-    let (choice, forced, user_bitrate) = (ctx.encoder, ctx.codec, ctx.bitrate_bps);
+    let (choice, forced, user_bitrate) = (ctx.encoder, settings.codec.only(), ctx.bitrate_bps);
     let negotiated = tokio::task::spawn_blocking(move || {
         crate::encoder::negotiate(choice, forced, &client_codecs, (width, height, fps), |codec| {
             user_bitrate.unwrap_or_else(|| default_bitrate(codec, width, height, fps))
@@ -143,6 +212,20 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     )
     .await?;
     let mut video = conn.open_uni().await?;
+    let session = ctx.registry.add(
+        SessionInfo {
+            id: 0,
+            client_name: hello.client_name.clone(),
+            addr: conn.remote_address(),
+            width,
+            height,
+            codec,
+            encoder: encoder.name(),
+            fps: 0.0,
+            mbps: 0.0,
+        },
+        conn.clone(),
+    );
 
     let (tx, mut rx) = mpsc::channel::<VideoFrame>(2);
     let encoder = {
@@ -160,7 +243,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
             }
             stats.add(frame.data.len());
             write_msg(&mut video, &frame).await?;
-            stats.maybe_log(&who);
+            stats.maybe_report(&who, &session);
         }
         anyhow::Ok(())
     };
@@ -168,7 +251,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         loop {
             match read_msg::<ClientMsg>(&mut recv).await? {
                 None => return anyhow::Ok(()),
-                Some(ClientMsg::Input(event)) if ctx.allow_input => source.inject(&event),
+                Some(ClientMsg::Input(event)) if ctx.settings().allow_input => source.inject(&event),
                 Some(ClientMsg::RequestKeyframe) => slot.request_keyframe(),
                 Some(_) => {}
             }
@@ -280,6 +363,7 @@ fn serial_for(client_id: &str) -> u32 {
 }
 
 fn encode_loop(slot: &FrameSlot, mut encoder: Box<dyn VideoEncoder>, tx: mpsc::Sender<VideoFrame>) -> Result<()> {
+    crate::platform::prioritize_current_thread();
     let start = Instant::now();
     let mut need_keyframe = true;
     loop {
@@ -301,29 +385,34 @@ fn encode_loop(slot: &FrameSlot, mut encoder: Box<dyn VideoEncoder>, tx: mpsc::S
     }
 }
 
+/// Frame rate and bitrate over 2 s windows: shown live in the menu, logged every 10 s.
 struct Stats {
     since: Instant,
     frames: u32,
     bytes: usize,
+    windows: u32,
 }
 
 impl Stats {
     fn new() -> Self {
-        Self { since: Instant::now(), frames: 0, bytes: 0 }
+        Self { since: Instant::now(), frames: 0, bytes: 0, windows: 0 }
     }
     fn add(&mut self, bytes: usize) {
         self.frames += 1;
         self.bytes += bytes;
     }
-    fn maybe_log(&mut self, who: &str) {
+    fn maybe_report(&mut self, who: &str, session: &SessionGuard) {
         let secs = self.since.elapsed().as_secs_f64();
-        if secs >= 10.0 {
-            tracing::info!(
-                "{who}: {:.0} fps, {:.1} Mbit/s",
-                self.frames as f64 / secs,
-                self.bytes as f64 * 8.0 / secs / 1e6
-            );
-            *self = Self::new();
+        if secs < 2.0 {
+            return;
         }
+        let fps = (self.frames as f64 / secs) as f32;
+        let mbps = (self.bytes as f64 * 8.0 / secs / 1e6) as f32;
+        session.update_stats(fps, mbps);
+        self.windows += 1;
+        if self.windows % 5 == 0 {
+            tracing::info!("{who}: {fps:.0} fps, {mbps:.1} Mbit/s");
+        }
+        *self = Self { windows: self.windows, ..Self::new() };
     }
 }

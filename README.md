@@ -56,14 +56,24 @@ The `.exe` (in `target/x86_64-pc-windows-gnu/release/`) is self-contained and on
 
 ## Use
 
-On the Mac that wants more screens:
+On the Mac that wants more screens, install the menu bar app:
+
+```bash
+./build/macos/bundle.sh --install
+```
+
+Then open **freemonplay** from Launchpad or Spotlight. It lives in the menu bar (no Dock icon) and shows the pairing code, connected screens with live stats and a Disconnect option for each, plus the codec, frame rate and input settings, Open at Login and the log. Install it to /Applications as above: macOS can stall apps that run from inside Documents, Desktop or Downloads behind file-access prompts.
+
+On MacBooks with a notch, menu bar icons that don't fit are hidden behind it. If you can't see the freemonplay icon, open freemonplay again (from Spotlight or Launchpad) and its menu appears at the pointer, or Cmd-drag other icons to make room.
+
+You can also run it in a terminal, which prints the pairing code:
 
 ```bash
 ./target/release/freemonplay-host
 ```
 
-It prints a 6 digit pairing code. The first run asks for two permissions for your terminal app (System Settings > Privacy & Security):
-- **Screen & System Audio Recording**, so it can capture the virtual displays. Restart the terminal after granting it.
+The first run asks for two permissions (System Settings > Privacy & Security), for freemonplay when you use the app, or for your terminal app when you run it in a terminal:
+- **Screen & System Audio Recording**, so it can capture the virtual displays. Restart the app or terminal after granting it.
 - **Accessibility**, so clients can control the mouse and keyboard. Without it the screens are view-only.
 
 On each device that should become a screen:

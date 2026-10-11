@@ -25,6 +25,17 @@ pub fn hardware_encoder(
     bail!("no hardware encoder support on this OS yet")
 }
 
+/// No-op where we don't have an equivalent yet.
+pub struct Activity;
+
+impl Activity {
+    pub fn begin(_reason: &str) -> Self {
+        Self
+    }
+}
+
+pub fn prioritize_current_thread() {}
+
 pub fn check_permissions() -> Result<()> {
     bail!("this OS can't host virtual displays yet (only macOS so far). The client works here though.")
 }

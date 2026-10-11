@@ -88,6 +88,22 @@ impl HostStore {
         self.pairing.lock().unwrap().code.clone()
     }
 
+    /// Replaces the pairing code (e.g. after showing it to someone you don't want pairing).
+    pub fn new_pairing_code(&self) -> String {
+        let mut p = self.pairing.lock().unwrap();
+        p.code = new_code();
+        p.failures = 0;
+        p.code.clone()
+    }
+
+    pub fn dir(&self) -> &std::path::Path {
+        &self.dir
+    }
+
+    pub fn paired_count(&self) -> usize {
+        self.trusted.lock().unwrap().clients.len()
+    }
+
     pub fn cert_fingerprint(&self) -> String {
         hex(&Sha256::digest(&self.cert_der))
     }
