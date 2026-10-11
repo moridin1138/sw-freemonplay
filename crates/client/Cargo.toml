@@ -1,0 +1,27 @@
+[package]
+name = "freemonplay-client"
+description = "Shows a freemonplay virtual display full screen and sends input back"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fmp-proto.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+directories.workspace = true
+mdns-sd.workspace = true
+openh264.workspace = true
+quinn.workspace = true
+rand.workspace = true
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.4"
+wgpu = "30"
+winit = "0.30"
