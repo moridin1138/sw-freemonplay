@@ -35,6 +35,14 @@ Binaries end up in `target/release/freemonplay-host` and `target/release/freemon
 sudo apt install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-bad gstreamer1.0-libav intel-media-va-driver
 ```
 
+Or build it from a Mac (or any machine with Docker), without a Linux box:
+
+```bash
+./build/linux/build.sh
+```
+
+That builds an x86_64 binary in an Ubuntu 22.04 container, at `target/linux-x86_64/release/freemonplay-client`. It runs on Ubuntu 22.04+, Debian 12+ and other distros from 2022 onwards. The target machine still needs GStreamer's runtime plugins: `sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-libav intel-media-va-driver`.
+
 `intel-media-va-driver` gives Intel GPUs (including low-power ones like Jasper Lake) hardware decoding; use `mesa-va-drivers` for AMD. Without GStreamer's H.264 plugins the client falls back to its bundled OpenH264. To force a particular GStreamer decoder, set `FMP_GST_DECODER` (for example `FMP_GST_DECODER=avdec_h264`).
 
 **Windows client:** build natively with `cargo build --release -p freemonplay-client`, or cross-compile from a Mac:

@@ -98,12 +98,15 @@ impl FrameSlot {
     }
 }
 
+/// `ready` fires once the decoder exists (or failed to start), so the caller can hold off
+/// reading video until then. Starting can take seconds, e.g. GStreamer's first-run plugin scan.
 pub fn run(
     codec: Codec,
     frames: mpsc::Receiver<VideoFrame>,
     slot: Arc<FrameSlot>,
     proxy: EventLoopProxy<UserEvent>,
     outgoing: &UnboundedSender<ClientMsg>,
+    ready: tokio::sync::oneshot::Sender<()>,
 ) {
     let deliver: Deliver = {
         let proxy = proxy.clone();
@@ -121,6 +124,7 @@ pub fn run(
         }
     };
     tracing::info!("decoding with {}", decoder.name());
+    let _ = ready.send(());
     let _ = outgoing.send(ClientMsg::RequestKeyframe);
     for frame in frames {
         match decoder.decode(&frame.data) {

@@ -261,12 +261,19 @@ pub async fn run(mut s: Session) -> Result<String> {
     let mut video = conn.accept_uni().await?;
     // Small queue: if decoding can't keep up we'd rather skip ahead to a keyframe than lag.
     let (frame_tx, frame_rx) = std_mpsc::sync_channel::<VideoFrame>(4);
+    let (ready_tx, ready_rx) = oneshot::channel();
     {
         let (frames, proxy, tx) = (s.frames.clone(), s.proxy.clone(), s.outgoing_tx.clone());
         let codec = welcome.codec;
         std::thread::Builder::new()
             .name("decoder".into())
-            .spawn(move || decode::run(codec, frame_rx, frames, proxy, &tx))?;
+            .spawn(move || decode::run(codec, frame_rx, frames, proxy, &tx, ready_tx))?;
+    }
+    // Let video wait in the network buffer until the decoder can take it, rather than
+    // discarding frames (and asking for keyframes) while it starts up. If it failed to
+    // start, it has already told the UI why.
+    if ready_rx.await.is_err() {
+        return Ok("decoder failed to start".into());
     }
 
     let reader = async {
