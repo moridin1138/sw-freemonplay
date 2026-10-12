@@ -1,0 +1,8 @@
+# Cross-building Windows binaries from a Mac with Homebrew's MinGW: link the C++ runtime
+# (used by OpenH264) statically, so the .exe doesn't need libstdc++-6.dll next to it. CI
+# builds Windows with MSVC and isn't affected; elsewhere the extra search path is ignored.
+[env]
+CXXSTDLIB_x86_64_pc_windows_gnu = "static=stdc++"
+
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-arg=-static", "-L", "native=/opt/homebrew/opt/mingw-w64/toolchain-x86_64/x86_64-w64-mingw32/lib"]

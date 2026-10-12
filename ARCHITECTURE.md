@@ -40,7 +40,14 @@ crates/
                       network.rs (this Mac's Wi-Fi, via CoreWLAN),
                       kvm.rs (event tap: watch the pointer, capture and forward input),
                       clipboard.rs (the general pasteboard as text)
-    platform/unsupported.rs   stubs (and the plan) for Windows and Linux hosts
+    platform/windows/ preview: capture.rs (Windows.Graphics.Capture, GPU scale to NV12
+                      into a leased texture ring), encoder.rs (Media Foundation hardware
+                      encoder, asynchronous MFT, same D3D11 device: zero copy), d3d.rs (the
+                      shared device), input.rs (SendInput), clipboard.rs, display.rs (virtual
+                      monitors: Extend via the display configuration API, closest listed
+                      mode, removed on disconnect), driver.rs (installs the Virtual Display
+                      Driver with 3 monitors and a resolution list)
+    platform/unsupported.rs   stubs (and the plan) for the Linux host
   client/   freemonplay-client: discovery, sessions, decoding, rendering, input, GUI
     app.rs            the app state machine and its windows ("displays")
     ui.rs             egui screens: host list, pairing code, connecting

@@ -80,6 +80,16 @@ struct Args {
     /// 2732x2048@2x (HiDPI), 1920x1080:30 (30 Hz).
     #[arg(long, value_name = "WxH")]
     probe_display: Option<String>,
+    /// Windows: install the Virtual Display Driver from this folder (the unpacked
+    /// VirtualDisplayDriver-x86.Driver.Only.zip), so screens extend the desktop instead of
+    /// mirroring it. Run once, as administrator.
+    #[cfg(target_os = "windows")]
+    #[arg(long, value_name = "FOLDER")]
+    install_display_driver: Option<PathBuf>,
+    /// Windows: remove the Virtual Display Driver's device (as administrator).
+    #[cfg(target_os = "windows")]
+    #[arg(long)]
+    uninstall_display_driver: bool,
 }
 
 fn main() -> Result<()> {
@@ -90,6 +100,15 @@ fn main() -> Result<()> {
 
     if let Some(size) = &args.probe_display {
         return probe_display(size);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(folder) = &args.install_display_driver {
+            return platform::driver::install(folder);
+        }
+        if args.uninstall_display_driver {
+            return platform::driver::uninstall();
+        }
     }
     if args.test_pattern {
         tracing::warn!("test pattern mode: clients get a generated picture, not a virtual display");
@@ -188,9 +207,14 @@ fn make_endpoint(store: &HostStore, port: u16) -> Result<quinn::Endpoint> {
         .send_window(16 * 1024 * 1024);
     config.transport_config(Arc::new(transport));
 
-    // Dual-stack socket: accepts IPv4 and IPv6.
+    // Dual-stack socket: accepts IPv4 and IPv6. Windows makes IPv6 sockets IPv6-only unless
+    // told otherwise (macOS and Linux don't), so say so explicitly.
     let addr = SocketAddr::from((Ipv6Addr::UNSPECIFIED, port));
-    quinn::Endpoint::server(config, addr).with_context(|| format!("can't listen on UDP port {port}"))
+    let socket = socket2::Socket::new(socket2::Domain::IPV6, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))?;
+    socket.set_only_v6(false)?;
+    socket.bind(&addr.into()).with_context(|| format!("can't listen on UDP port {port}"))?;
+    let runtime = quinn::default_runtime().context("no async runtime")?;
+    Ok(quinn::Endpoint::new(quinn::EndpointConfig::default(), Some(config), socket.into(), runtime)?)
 }
 
 /// Our mDNS announcement. Withdrawing it tells clients right away that we've gone, rather

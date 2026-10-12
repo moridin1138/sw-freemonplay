@@ -9,6 +9,17 @@ publishes it as the release notes.
 Hosts and clients must both be updated: the protocol changed (version 10).
 
 ### Added
+- **Windows host, preview:** a Windows PC can now get extra screens too. Each screen
+  extends the desktop onto a virtual monitor at its own resolution, through the signed,
+  MIT licensed Virtual Display Driver (install it once, as administrator, with
+  `freemonplay-host --install-display-driver <folder>`; without it, screens mirror the
+  primary monitor). Windows.Graphics.Capture (cursor included), scaled and converted to
+  NV12 on the GPU, hardware encoded by Media Foundation (H.264 or HEVC, e.g. Intel Quick
+  Sync) on the same device, so frames never pass through system memory; OpenH264 is the
+  fallback. Input by `SendInput`, and the shared clipboard. Tested on a Surface (Iris Xe)
+  extending onto a MacBook Air at 2940x1912 HEVC. Run `freemonplay-host` from a terminal;
+  there's no tray app yet. Run `freemonplay-host` from a terminal; there's no tray app
+  yet.
 - **Mac downloads are disk images:** open one and drag the app to Applications.
 - **Copied images are shared too** (screenshots, images copied from apps), both ways,
   as PNG up to 24 MB. They travel on streams of their own, so a big one doesn't hold up
@@ -19,6 +30,8 @@ Hosts and clients must both be updated: the protocol changed (version 10).
   NetworkManager.
 
 ### Fixed
+- The host now accepts IPv4 connections on Windows too (its listening socket is explicitly
+  dual-stack; Windows makes IPv6 sockets IPv6-only by default).
 - The burst of frames that arrives when Wi-Fi recovers from a stall no longer makes the
   client drop video and ask for a keyframe (the biggest kind of frame, on a link that had
   just stalled). It now decodes the burst, which takes milliseconds, and shows the newest

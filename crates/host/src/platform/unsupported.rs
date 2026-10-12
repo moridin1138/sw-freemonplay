@@ -1,9 +1,7 @@
-//! Placeholder for hosts that aren't implemented yet, so the workspace still builds there.
+//! Placeholder for hosts that aren't implemented yet (Linux), so the workspace still builds
+//! there.
 //!
 //! Plan:
-//! - Windows: bundle the MIT licensed Virtual Display Driver (an Indirect Display Driver)
-//!   and drive it over its IOCTL/named-pipe interface; capture with
-//!   Windows.Graphics.Capture; inject with SendInput.
 //! - Linux: GNOME via Mutter's RemoteDesktop/ScreenCast D-Bus API (`RecordVirtual` makes a
 //!   virtual monitor and gives a PipeWire stream), wlroots via `create_output`, X11 via a
 //!   dummy xrandr output; capture with PipeWire; inject with libei or uinput.

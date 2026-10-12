@@ -392,11 +392,16 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     let watchdog = async {
         tokio::time::sleep(Duration::from_secs(3)).await;
         if !slot.has_frame() {
-            let message = "no frames are being captured. Check that freemonplay (or the terminal running \
-                           it) has Screen Recording permission in System Settings > Privacy & Security > \
-                           Screen & System Audio Recording, then restart it. If it's already on, remove \
-                           the entry and allow it again: it may belong to an older build."
-                .to_string();
+            let message = if cfg!(target_os = "macos") {
+                "no frames are being captured. Check that freemonplay (or the terminal running \
+                 it) has Screen Recording permission in System Settings > Privacy & Security > \
+                 Screen & System Audio Recording, then restart it. If it's already on, remove \
+                 the entry and allow it again: it may belong to an older build."
+            } else {
+                "no frames are being captured from this screen's monitor yet. Try disconnecting \
+                 and connecting again."
+            }
+            .to_string();
             tracing::warn!("{who}: {message}");
             let _ = host_tx.send(HostMsg::Notice { message });
         }
@@ -422,6 +427,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         r = receive_images(&conn, &ctx, session.id()) => r,
         _ = conn.closed() => Ok(()),
     };
+    tracing::debug!("{who}: session ended; cleaning up");
     ctx.kvm.unregister(session.id());
     ctx.clipboard.unregister(session.id());
 
@@ -431,9 +437,11 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         Err(_) => tracing::error!("encoder thread panicked"),
         Ok(Ok(())) => {}
     }
+    tracing::debug!("{who}: encoder stopped");
     // Stop capture before unplugging the display it captures.
     if let Source::Screen { display, capture, .. } = source {
         drop(capture);
+        tracing::debug!("{who}: capture stopped");
         drop(display);
     }
     result

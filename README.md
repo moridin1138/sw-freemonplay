@@ -15,10 +15,10 @@ See [CHANGELOG.md](CHANGELOG.md) for what's new, [ARCHITECTURE.md](ARCHITECTURE.
 | Part | macOS | Windows | Linux |
 |---|---|---|---|
 | Client (view + input) | ✅ | ✅ (tested on a Surface, Iris Xe) | builds; not yet run on Linux |
-| Host: virtual display | ✅ `CGVirtualDisplay` | planned: Virtual Display Driver (IDD) | planned: Mutter / wlroots / xrandr |
-| Host: capture | ✅ ScreenCaptureKit | planned: Windows.Graphics.Capture | planned: PipeWire |
-| Host: input injection | ✅ CGEvent | planned: SendInput | planned: libei / uinput |
-| Host: hardware encoding | ✅ VideoToolbox (H.264, HEVC) | planned: Media Foundation / NVENC | planned: VAAPI |
+| Host: virtual display | ✅ `CGVirtualDisplay` | ✅ preview: Virtual Display Driver (IDD), extends the desktop | planned: Mutter / wlroots / xrandr |
+| Host: capture | ✅ ScreenCaptureKit | ✅ Windows.Graphics.Capture (GPU scaling to NV12) | planned: PipeWire |
+| Host: input injection | ✅ CGEvent | ✅ SendInput | planned: libei / uinput |
+| Host: hardware encoding | ✅ VideoToolbox (H.264, HEVC) | ✅ Media Foundation (H.264, HEVC), zero copy from capture | planned: VAAPI |
 | Client: decoding (H.264, HEVC) | ✅ VideoToolbox (hardware) | ✅ Media Foundation, DXVA on the GPU (software fallback) | GStreamer: VAAPI hardware, else system software decoder |
 | Client: zero-copy display | ✅ Metal | ✅ Direct3D 12 | planned |
 | Client: several monitors | ✅ | ✅ (not yet tested with real extra monitors) | ✅ (untested) |
@@ -131,6 +131,16 @@ Useful options:
 Client shortcuts while connected (not sent to the host): **Ctrl+Alt+Shift+D** disconnects all screens (back to the list), **Ctrl+Alt+Shift+F** toggles full screen, **Ctrl+Alt+Shift+Q** quits.
 
 Quick test on one Mac: run the host, then `freemonplay-client --host 127.0.0.1 --windowed 1280x800`. A new display appears in System Settings > Displays. Drag a window onto it and it shows up in the client window.
+
+### Windows as the host (preview)
+
+A Windows PC can get extra screens too. Once, as administrator, install the [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT licensed, signed by the SignPath Foundation): unpack its `VirtualDisplayDriver-x86.Driver.Only.zip` and run
+
+```powershell
+freemonplay-host --install-display-driver C:\path\to\VirtualDisplayDriver
+```
+
+Windows asks once whether to trust the publisher. This sets the driver up with three virtual monitors and common resolutions (including Mac Retina sizes). Then run `freemonplay-host` normally (not as administrator): each screen that connects extends the desktop onto its own virtual monitor, removed again when it disconnects. Set a screen's scaling in Windows' Display settings; Windows remembers it. Without the driver, screens mirror the primary monitor. `--uninstall-display-driver` removes the device.
 
 ## How it works
 

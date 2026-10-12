@@ -1359,6 +1359,7 @@ name = "freemonplay-host"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "arboard",
  "block2 0.6.2",
  "clap",
  "directories",
@@ -1376,6 +1377,7 @@ dependencies = [
  "objc2-service-management",
  "objc2-video-toolbox",
  "openh264",
+ "png",
  "quinn",
  "rand 0.9.5",
  "rcgen",
@@ -1383,9 +1385,11 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "socket2",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "windows",
 ]
 
 [[package]]

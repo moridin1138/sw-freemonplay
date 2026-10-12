@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 /// the software encoder converts to I420 when it needs to.
 pub enum Frame {
     I420(I420Frame),
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     Native(crate::platform::NativeFrame),
 }
 
@@ -16,7 +16,7 @@ impl Frame {
     pub fn captured_at(&self) -> Instant {
         match self {
             Frame::I420(f) => f.captured_at,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             Frame::Native(f) => f.captured_at,
         }
     }
@@ -24,7 +24,7 @@ impl Frame {
     pub fn to_i420(&self) -> Option<Cow<'_, I420Frame>> {
         match self {
             Frame::I420(f) => Some(Cow::Borrowed(f)),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             Frame::Native(f) => f.to_i420().map(Cow::Owned),
         }
     }
