@@ -36,7 +36,10 @@ impl Pattern {
     }
 
     pub fn inject(&self, event: &InputEvent) {
-        tracing::debug!("input: {event:?}");
+        // Never which keys: logs mustn't record what people type.
+        if !matches!(event, InputEvent::Key { .. }) {
+            tracing::debug!("input: {event:?}");
+        }
         match *event {
             InputEvent::PointerMove { x, y } | InputEvent::Touch { x, y, .. } => *self.pointer.lock().unwrap() = (x, y),
             _ => {}

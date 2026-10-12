@@ -167,7 +167,7 @@ Windows releases: free code signing provided by [SignPath.io](https://about.sign
 - Only the programs built from this repository's source by its GitHub Actions workflows are signed, and each release's signing is approved by hand.
 - The Windows host installer also contains the [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT licensed), unchanged and with its own signature.
 - Team: committers and reviewers: [moridin1138](https://github.com/moridin1138). Approvers: [moridin1138](https://github.com/moridin1138).
-- Privacy: Freemonplay talks only to the computers you connect it to on your own network (and announces itself there, so they can find it). It doesn't transfer any information to other networked systems unless you ask it to, such as opening the download page from the setup window.
+- Privacy: Freemonplay talks only to the computers you connect it to on your own network (and announces itself there, so they can find it). It doesn't transfer any information to other networked systems unless you ask it to, such as opening the download page from the setup window. See the [privacy policy](PRIVACY.md).
 
 How releases are signed is described in [SIGNING.md](SIGNING.md).
 
