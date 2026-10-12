@@ -409,9 +409,14 @@ pub async fn run(mut s: Session) -> Result<String> {
         return Ok("decoder failed to start".into());
     }
 
+    // Capture-to-arrival offsets this reporting window (host and client clocks differ, so
+    // only differences within a window mean anything).
+    let transit = Mutex::new(Vec::<i64>::new());
+    let clock = Instant::now();
     let reader = async {
         let mut waiting_for_keyframe = false;
         while let Some(frame) = read_msg::<VideoFrame>(&mut video).await? {
+            transit.lock().unwrap().push(clock.elapsed().as_micros() as i64 - frame.pts_us as i64);
             if waiting_for_keyframe && !frame.keyframe {
                 continue;
             }
@@ -433,6 +438,7 @@ pub async fn run(mut s: Session) -> Result<String> {
             // The UI measures display latency; the network side knows the round trip.
             if let ClientMsg::Stats(stats) = &mut msg {
                 stats.rtt_ms = (conn.rtt().as_secs_f64() * 1e3) as f32;
+                (stats.late_frames, stats.worst_late_ms) = lateness(&std::mem::take(&mut *transit.lock().unwrap()));
             }
             write_msg(&mut send, &msg).await?;
         }
@@ -461,9 +467,25 @@ pub async fn run(mut s: Session) -> Result<String> {
     }
 }
 
+/// Frames delayed in transit, from capture-to-arrival offsets (µs) on mismatched clocks:
+/// how many took more than 30 ms longer than the quickest, and the worst extra time (ms).
+fn lateness(offsets: &[i64]) -> (u32, f32) {
+    let Some(&best) = offsets.iter().min() else { return (0, 0.0) };
+    let late = offsets.iter().filter(|&&o| o - best > 30_000).count() as u32;
+    let worst = offsets.iter().map(|&o| o - best).max().unwrap_or(0);
+    (late, worst as f32 / 1000.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn measures_lateness_against_the_quickest_frame() {
+        assert_eq!(lateness(&[]), (0, 0.0));
+        // Clock offset of about 5 s; one frame 45 ms slower than the best.
+        assert_eq!(lateness(&[5_000_010_000, 5_000_002_000, 5_000_047_000, 5_000_020_000]), (1, 45.0));
+    }
 
     #[test]
     fn explains_silence() {

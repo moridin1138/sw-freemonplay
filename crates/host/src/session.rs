@@ -294,7 +294,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
                 stalled += write_started.elapsed();
             }
             stats.add(bytes, captured_at.elapsed());
-            stats.maybe_report(&who, &session, conn.rtt());
+            stats.maybe_report(&who, &session, conn.rtt(), rate.loss());
 
             if tick.elapsed() >= rate::TICK {
                 let path = conn.stats().path;
@@ -329,6 +329,13 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
                 Some(ClientMsg::Stats(stats)) => {
                     session.update_client(stats);
                     tracing::debug!("{who}: screen reports {stats:?}");
+                    if stats.late_frames > 0 {
+                        tracing::info!(
+                            "{who}: {} frames delayed in transit (worst {:.0} ms over the quickest)",
+                            stats.late_frames,
+                            stats.worst_late_ms
+                        );
+                    }
                 }
                 Some(_) => {}
             }
@@ -509,7 +516,7 @@ impl Stats {
         self.bytes += bytes;
         self.host_latency += host_latency;
     }
-    fn maybe_report(&mut self, who: &str, session: &SessionGuard, rtt: Duration) {
+    fn maybe_report(&mut self, who: &str, session: &SessionGuard, rtt: Duration, loss: f64) {
         let secs = self.since.elapsed().as_secs_f64();
         if secs < 2.0 {
             return;
@@ -521,7 +528,10 @@ impl Stats {
         session.update_stats(fps, mbps, host_ms, rtt_ms);
         self.windows += 1;
         if self.windows.is_multiple_of(5) {
-            tracing::info!("{who}: {fps:.0} fps, {mbps:.1} Mbit/s, host {host_ms:.1} ms, round trip {rtt_ms:.1} ms");
+            tracing::info!(
+                "{who}: {fps:.0} fps, {mbps:.1} Mbit/s, host {host_ms:.1} ms, round trip {rtt_ms:.1} ms, {:.1}% packets lost",
+                loss * 100.0
+            );
         }
         *self = Self { windows: self.windows, ..Self::new() };
     }

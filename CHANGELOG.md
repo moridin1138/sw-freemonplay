@@ -6,7 +6,7 @@ publishes it as the release notes.
 
 ## [Unreleased]
 
-Hosts and clients must both be updated: the protocol changed (version 6).
+Hosts and clients must both be updated: the protocol changed (version 7).
 
 ### Added
 - **Adaptive bitrate.** The host lowers the bitrate when the network can't keep up (sends
@@ -19,6 +19,9 @@ Hosts and clients must both be updated: the protocol changed (version 6).
 - **Network diagnostics in the menu:** each screen's link (Wi-Fi standard, band, signal,
   link rate, or wired; Windows clients for now) and this Mac's own Wi-Fi, with tips such
   as "on 2.4 GHz" or "AWDL is active". `--self-test` reports the client's link too.
+- **Delay and loss measurements:** each screen reports how many frames were delayed in
+  transit (and by how much), and the host logs packet loss, so you can tell Wi-Fi
+  stalls from a slow link.
 - **Several monitors on one client.** Tick "Also use these monitors" (or pass
   `--all-monitors`) and each of the client's monitors becomes its own screen on the host,
   remembered separately by macOS. The main window's screen keeps its identity, so existing

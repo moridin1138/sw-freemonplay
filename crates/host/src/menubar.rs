@@ -307,6 +307,10 @@ impl Controller {
                         format!("    Network (half the {:.1} ms round trip): {:.1} ms", s.rtt_ms, s.rtt_ms / 2.0),
                         format!("    Screen (received to shown): {:.1} ms", client.display_ms),
                         format!("Screen is showing {:.0} fps", client.shown_fps),
+                        match client.late_frames {
+                            0 => "No frames delayed in transit".to_string(),
+                            n => format!("{n} frames delayed in transit (worst {:.0} ms)", client.worst_late_ms),
+                        },
                     ];
                     for line in lines {
                         details.addItem(&self.item(&line, None, 0));

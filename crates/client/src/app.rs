@@ -890,7 +890,10 @@ impl ShownStats {
         let stats = ClientStats {
             shown_fps: (self.frames as f64 / secs) as f32,
             display_ms: (self.total.as_secs_f64() * 1e3 / self.timed as f64) as f32,
-            rtt_ms: 0.0, // filled in by the network side
+            // Filled in by the network side.
+            rtt_ms: 0.0,
+            late_frames: 0,
+            worst_late_ms: 0.0,
         };
         self.reports += 1;
         if self.reports.is_multiple_of(5) {

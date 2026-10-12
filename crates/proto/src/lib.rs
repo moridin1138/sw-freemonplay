@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub mod hid;
 pub mod pairing;
 
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 pub const ALPN: &[u8] = b"freemonplay/1";
 pub const SERVICE_TYPE: &str = "_freemonplay._udp.local.";
 pub const DEFAULT_PORT: u16 = 47800;
@@ -55,6 +55,11 @@ pub struct ClientStats {
     pub display_ms: f32,
     /// The client's view of the network round-trip time, in milliseconds.
     pub rtt_ms: f32,
+    /// Frames that took more than 30 ms longer from capture to arrival than the quickest
+    /// frame in the same window: delayed in transit (lost packets resent, Wi-Fi stalls).
+    pub late_frames: u32,
+    /// The most delayed frame's extra time over the quickest, in milliseconds.
+    pub worst_late_ms: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
