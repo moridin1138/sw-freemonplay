@@ -155,8 +155,8 @@ impl Remote {
     fn give_back(&mut self, at: ReturnAt) -> Vec<ClientMsg> {
         let mut out = Vec::new();
         // So a paste on the host works right away, without waiting for the next poll.
-        if let Some(text) = self.clipboard.as_ref().and_then(|c| c.copied()) {
-            out.push(ClientMsg::Clipboard(text));
+        if let Some(item) = self.clipboard.as_ref().and_then(|c| c.copied()) {
+            out.push(item.into_message());
         }
         out.push(ClientMsg::ReturnControl(at));
         tracing::info!("keyboard and mouse back to the host");

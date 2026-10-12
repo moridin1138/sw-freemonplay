@@ -102,13 +102,15 @@ pub mod kvm {
 }
 
 pub mod clipboard {
+    use crate::clipboard::Item;
+
     pub fn change_count() -> i64 {
         0
     }
-    pub fn text() -> Option<String> {
+    pub fn read() -> Option<Item> {
         None
     }
-    pub fn set_text(_text: &str) -> i64 {
+    pub fn write(_item: &Item) -> i64 {
         0
     }
 }

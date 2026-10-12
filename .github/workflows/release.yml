@@ -26,11 +26,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > notes.md <<'EOF'
-          **Mac (the computer that wants more screens):** download `freemonplay-macos.zip`, unzip, move freemonplay to Applications. The first time, right-click it and choose Open (it isn't notarized by Apple).
+          **Mac (the computer that wants more screens):** open `freemonplay-macos.dmg` and drag freemonplay to Applications. The first time, right-click it and choose Open (it isn't notarized by Apple yet).
 
           **Screens:** on each device that should become a screen (or take the Mac's keyboard and mouse):
           - **Windows:** run `freemonplay-screen-windows-x64-setup.exe` (no administrator rights needed; a newer one updates in place). SmartScreen may warn because it isn't signed; choose More info, then Run anyway. `freemonplay-screen-windows-x64.zip` is the same program without an installer.
-          - **Mac:** download `freemonplay-screen-macos.zip`, unzip, move freemonplay Screen to Applications, and right-click > Open the first time.
+          - **Mac:** open `freemonplay-screen-macos.dmg`, drag freemonplay Screen to Applications, and right-click > Open the first time.
           - **Linux:** unpack `freemonplay-screen-linux-x86_64.tar.gz` and run `freemonplay-client` (the `.desktop` file adds it to the app menu). It needs GStreamer's plugins: `sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-libav` (plus `intel-media-va-driver` for Intel GPU decoding).
           EOF
           # This version's section of CHANGELOG.md (from "## [x.y.z]" to the next "## [").

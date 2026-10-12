@@ -156,10 +156,13 @@ clients can't be controlled yet.
 
 ## Clipboard
 
-Text only, both ways, for clients that set `Hello::clipboard` (one session per client
+Text and images, both ways, for clients that set `Hello::clipboard` (one session per client
 computer, so several monitors don't triple it). Each side polls its clipboard's change
-counter about once a second (Linux compares the text itself) and sends new text as
-`Clipboard`. The host's hub (`clipboard.rs`) remembers what each client has, so text never
+counter about once a second (Linux compares the content itself) and sends what's new:
+text as `Clipboard` on the control stream, images as `ClipboardImage` (PNG, up to 24 MB) on
+a unidirectional stream of their own, so a few megabytes don't hold up input. When both
+are present, text wins. Mac pasteboards often hold only TIFF (screenshots, Preview), which
+is converted to PNG; Windows and Linux clipboards give RGBA pixels, encoded with `png`. The host's hub (`clipboard.rs`) remembers what each client has, so text never
 bounces back, and passes text from one client on to the others. Items marked private are
 skipped: macOS `org.nspasteboard.ConcealedType` and `TransientType`, Windows
 `ExcludeClipboardContentFromMonitorProcessing` (what password managers set). In keyboard

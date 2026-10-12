@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use fmp_proto::{
     ALPN, Auth, ClientMsg, Codec, DEFAULT_PORT, DisplayRequest, Hello, HostMsg, PROTOCOL_VERSION, RejectKind,
-    SERVICE_TYPE, ScreenId, VideoFrame, pairing,
+    MAX_CLIPBOARD_IMAGE_BYTES, SERVICE_TYPE, ScreenId, VideoFrame, pairing,
     read_msg, write_msg,
 };
 use rustls::DigitallySignedStruct;
@@ -21,7 +21,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::decode::{self, FrameSlot};
 use crate::store::{self, ClientStore, hex};
-use crate::clip::ClipSync;
+use crate::clip::{ClipSync, Item};
 use crate::{UserEvent, kvm};
 
 #[derive(Clone)]
@@ -461,6 +461,11 @@ pub async fn run(mut s: Session) -> Result<String> {
                 stats.rtt_ms = (conn.rtt().as_secs_f64() * 1e3) as f32;
                 (stats.late_frames, stats.worst_late_ms) = lateness(&std::mem::take(&mut *transit.lock().unwrap()));
             }
+            // Images get a stream of their own, so they don't hold up input.
+            if let ClientMsg::ClipboardImage(_) = msg {
+                send_image(&conn, msg);
+                continue;
+            }
             write_msg(&mut send, &msg).await?;
         }
         anyhow::Ok(())
@@ -475,7 +480,7 @@ pub async fn run(mut s: Session) -> Result<String> {
                 }
                 HostMsg::Clipboard(text) => {
                     if let Some(clipboard) = &s.clipboard {
-                        clipboard.received(text);
+                        clipboard.received(Item::Text(text));
                     }
                 }
                 msg => {
@@ -492,19 +497,37 @@ pub async fn run(mut s: Session) -> Result<String> {
         anyhow::Ok(())
     };
 
-    // Text copied here goes to the host.
+    // What's copied here goes to the host; images the host copied arrive on streams of
+    // their own (after the video stream, accepted above).
     let clipboard = async {
         let Some(clipboard) = &s.clipboard else { return std::future::pending().await };
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
-            if let Some(text) = clipboard.copied() {
-                let _ = s.outgoing_tx.send(ClientMsg::Clipboard(text));
+            // Reading (and PNG-encoding) a big image takes a moment; keep it off this thread.
+            let reader = clipboard.clone();
+            if let Ok(Some(item)) = tokio::task::spawn_blocking(move || reader.copied()).await {
+                let _ = s.outgoing_tx.send(item.into_message());
             }
         }
+    };
+    let images = async {
+        let Some(clipboard) = &s.clipboard else { return std::future::pending().await };
+        while let Ok(mut stream) = conn.accept_uni().await {
+            match read_msg::<HostMsg>(&mut stream).await {
+                Ok(Some(HostMsg::ClipboardImage(png))) if png.len() <= MAX_CLIPBOARD_IMAGE_BYTES => {
+                    let writer = clipboard.clone();
+                    tokio::task::spawn_blocking(move || writer.received(Item::Image(png)));
+                }
+                Ok(_) => {}
+                Err(e) => tracing::debug!("couldn't receive a copied image: {e:#}"),
+            }
+        }
+        std::future::pending().await
     };
 
     tokio::select! {
         () = clipboard => unreachable!("the clipboard loop never ends"),
+        () = images => unreachable!("the image loop never ends"),
         r = reader => r.map(|()| "host stopped streaming".to_string()),
         r = writer => r.map(|()| "closed".to_string()),
         r = notices => r.map(|()| "closed".to_string()),
@@ -513,6 +536,22 @@ pub async fn run(mut s: Session) -> Result<String> {
             other => other.to_string(),
         }),
     }
+}
+
+/// Sends a copied image on a stream of its own.
+fn send_image(conn: &quinn::Connection, msg: ClientMsg) {
+    let conn = conn.clone();
+    tokio::spawn(async move {
+        let sent = async {
+            let mut stream = conn.open_uni().await?;
+            write_msg(&mut stream, &msg).await?;
+            stream.finish()?;
+            anyhow::Ok(())
+        };
+        if let Err(e) = sent.await {
+            tracing::debug!("couldn't send a copied image: {e:#}");
+        }
+    });
 }
 
 /// Frames delayed in transit, from capture-to-arrival offsets (µs) on mismatched clocks:

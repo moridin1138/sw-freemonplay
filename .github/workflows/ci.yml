@@ -29,9 +29,8 @@ jobs:
         run: ./build/macos/bundle.sh --client --universal
       - name: Package
         run: |
-          mkdir -p dist
-          ditto -c -k --keepParent target/freemonplay.app dist/freemonplay-macos.zip
-          ditto -c -k --keepParent "target/freemonplay Screen.app" dist/freemonplay-screen-macos.zip
+          ./build/macos/make-dmg.sh target/freemonplay.app dist/freemonplay-macos.dmg
+          ./build/macos/make-dmg.sh "target/freemonplay Screen.app" dist/freemonplay-screen-macos.dmg
       - uses: actions/upload-artifact@v7
         with:
           name: macos

@@ -6,7 +6,14 @@ publishes it as the release notes.
 
 ## [Unreleased]
 
+Hosts and clients must both be updated: the protocol changed (version 10).
+
 ### Added
+- **Mac downloads are disk images:** open one and drag the app to Applications.
+- **Copied images are shared too** (screenshots, images copied from apps), both ways,
+  as PNG up to 24 MB. They travel on streams of their own, so a big one doesn't hold up
+  the keyboard and mouse. When something copied has both text and an image, the text is
+  shared.
 - Mac and Linux screens report their network link to the host's menu too (Wi-Fi band,
   signal and link rate, or wired, with tips), as Windows screens already did. Linux uses
   NetworkManager.

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use fmp_proto::{
-    Auth, ClientMsg, Codec, DisplayRequest, Edge, Hello, HostMsg, InputEvent, PROTOCOL_VERSION, RejectKind, VideoFrame,
+    Auth, ClientMsg, Codec, DisplayRequest, Edge, Hello, MAX_CLIPBOARD_IMAGE_BYTES, HostMsg, InputEvent, PROTOCOL_VERSION, RejectKind, VideoFrame,
     Welcome,
     decode, pairing, peek_hello_protocol, read_frame, read_msg, write_msg,
 };
@@ -18,7 +18,7 @@ use crate::frame::{FrameSlot, Next};
 use crate::pattern::Pattern;
 use crate::platform::{Capture, Injector, VirtualDisplay};
 use crate::rate::{self, RateControl};
-use crate::clipboard::Hub;
+use crate::clipboard::{Hub, Item};
 use crate::kvm::{Anchor, Kvm};
 use crate::registry::{KvmRole, Registry, SessionGuard, SessionInfo};
 use crate::settings::Settings;
@@ -366,7 +366,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
                     slot.request_keyframe();
                 }
                 Some(ClientMsg::ReturnControl(at)) => ctx.kvm.return_control(session.id(), at),
-                Some(ClientMsg::Clipboard(text)) => ctx.clipboard.copied_on_client(session.id(), text),
+                Some(ClientMsg::Clipboard(text)) => ctx.clipboard.copied_on_client(session.id(), Item::Text(text)),
                 Some(ClientMsg::Network(network)) => {
                     tracing::info!("{who}: network: {}", network.summary);
                     session.update_network(network);
@@ -405,6 +405,10 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     };
     let writer = async {
         while let Some(msg) = host_rx.recv().await {
+            if let HostMsg::ClipboardImage(_) = msg {
+                send_image(&conn, msg);
+                continue;
+            }
             write_msg(&mut send, &msg).await?;
         }
         anyhow::Ok(())
@@ -415,6 +419,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         r = control => r,
         r = watchdog => r,
         r = writer => r,
+        r = receive_images(&conn, &ctx, session.id()) => r,
         _ = conn.closed() => Ok(()),
     };
     ctx.kvm.unregister(session.id());
@@ -432,6 +437,38 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         drop(display);
     }
     result
+}
+
+/// Sends a copied image on a stream of its own, so a few megabytes of PNG don't hold up
+/// the control stream (keyboard and mouse mode sends input on it).
+fn send_image(conn: &quinn::Connection, msg: HostMsg) {
+    let conn = conn.clone();
+    tokio::spawn(async move {
+        let sent = async {
+            let mut stream = conn.open_uni().await?;
+            write_msg(&mut stream, &msg).await?;
+            stream.finish()?;
+            anyhow::Ok(())
+        };
+        if let Err(e) = sent.await {
+            tracing::debug!("couldn't send a copied image: {e:#}");
+        }
+    });
+}
+
+/// Images the client copied, each on a stream of its own.
+async fn receive_images(conn: &quinn::Connection, ctx: &Ctx, session: u64) -> Result<()> {
+    while let Ok(mut stream) = conn.accept_uni().await {
+        match read_msg::<ClientMsg>(&mut stream).await {
+            Ok(Some(ClientMsg::ClipboardImage(png))) if png.len() <= MAX_CLIPBOARD_IMAGE_BYTES => {
+                ctx.clipboard.copied_on_client(session, Item::Image(png));
+            }
+            Ok(_) => {}
+            Err(e) => tracing::debug!("couldn't receive a copied image: {e:#}"),
+        }
+    }
+    // The connection ended; the other branches report how.
+    std::future::pending().await
 }
 
 /// A keyboard-and-mouse-only session: no display, no video. The client's monitors sit
@@ -498,7 +535,7 @@ async fn input_only(
             match read_msg::<ClientMsg>(&mut recv).await? {
                 None => return anyhow::Ok(()),
                 Some(ClientMsg::ReturnControl(at)) => ctx.kvm.return_control(session.id(), at),
-                Some(ClientMsg::Clipboard(text)) => ctx.clipboard.copied_on_client(session.id(), text),
+                Some(ClientMsg::Clipboard(text)) => ctx.clipboard.copied_on_client(session.id(), Item::Text(text)),
                 Some(ClientMsg::Network(network)) => session.update_network(network),
                 Some(_) => {}
             }
@@ -506,6 +543,10 @@ async fn input_only(
     };
     let writer = async {
         while let Some(msg) = host_rx.recv().await {
+            if let HostMsg::ClipboardImage(_) = msg {
+                send_image(&conn, msg);
+                continue;
+            }
             write_msg(&mut send, &msg).await?;
         }
         anyhow::Ok(())
@@ -513,6 +554,7 @@ async fn input_only(
     let result = tokio::select! {
         r = control => r,
         r = writer => r,
+        r = receive_images(&conn, ctx, session.id()) => r,
         _ = conn.closed() => Ok(()),
     };
     ctx.kvm.unregister(session.id());

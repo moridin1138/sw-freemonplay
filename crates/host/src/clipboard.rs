@@ -1,21 +1,46 @@
-//! Clipboard sharing: text copied here appears on connected screens' computers, and text
-//! copied there appears here (and on the other screens).
+//! Clipboard sharing: text and images copied here appear on connected screens' computers,
+//! and what's copied there appears here (and on the other screens).
 //!
 //! This side polls the clipboard's change counter about once a second; clients poll theirs
-//! and send what changed. Each side remembers what it last sent or received, so text
-//! never bounces back. Items marked concealed or transient (what password managers do) are
-//! never shared.
+//! and send what changed. Each side remembers what it last sent or received, so nothing
+//! bounces back. Items marked concealed or transient (what password managers do) are never
+//! shared. Images travel as PNG on streams of their own (see the session).
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use fmp_proto::HostMsg;
+use fmp_proto::{HostMsg, MAX_CLIPBOARD_IMAGE_BYTES};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::platform::clipboard as platform;
 
 const POLL: Duration = Duration::from_secs(1);
+
+/// What's on a clipboard, as far as sharing goes.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub enum Item {
+    Text(String),
+    /// PNG.
+    Image(Vec<u8>),
+}
+
+impl Item {
+    /// Identifies the content without keeping a copy of every image around.
+    fn fingerprint(&self) -> u64 {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.hash(&mut h);
+        h.finish()
+    }
+
+    fn message(&self) -> HostMsg {
+        match self {
+            Item::Text(text) => HostMsg::Clipboard(text.clone()),
+            Item::Image(png) => HostMsg::ClipboardImage(png.clone()),
+        }
+    }
+}
 
 pub struct Hub {
     state: Mutex<State>,
@@ -31,7 +56,7 @@ struct State {
 struct Peer {
     out: UnboundedSender<HostMsg>,
     /// What this peer's clipboard holds, as far as we know.
-    has: Option<String>,
+    has: Option<u64>,
 }
 
 impl Hub {
@@ -61,31 +86,32 @@ impl Hub {
         self.state.lock().unwrap().peers.remove(&session);
     }
 
-    /// Sends the current text to one peer if it doesn't have it yet (on connecting, and
+    /// Sends the current item to one peer if it doesn't have it yet (on connecting, and
     /// when the keyboard and mouse move over, so a paste right away works).
     pub fn sync_to(&self, session: u64) {
         let mut state = self.state.lock().unwrap();
         if !state.enabled {
             return;
         }
-        let Some(text) = platform::text() else { return };
+        let Some(item) = read() else { return };
         if let Some(peer) = state.peers.get_mut(&session) {
-            send(peer, &text);
+            send(peer, &item);
         }
     }
 
-    /// Text a client copied: put it on this clipboard and pass it to the other screens.
-    pub fn copied_on_client(&self, session: u64, text: String) {
+    /// Something a client copied: put it on this clipboard and pass it to the other screens.
+    pub fn copied_on_client(&self, session: u64, item: Item) {
         let mut state = self.state.lock().unwrap();
-        if !state.enabled || text.is_empty() {
+        if !state.enabled || matches!(&item, Item::Text(t) if t.is_empty()) {
             return;
         }
-        state.seen = platform::set_text(&text);
+        state.seen = platform::write(&item);
+        let fingerprint = item.fingerprint();
         for (&id, peer) in &mut state.peers {
             if id == session {
-                peer.has = Some(text.clone());
+                peer.has = Some(fingerprint);
             } else {
-                send(peer, &text);
+                send(peer, &item);
             }
         }
     }
@@ -97,18 +123,31 @@ impl Hub {
             return;
         }
         state.seen = count;
-        if let Some(text) = platform::text() {
+        if let Some(item) = read() {
             for peer in state.peers.values_mut() {
-                send(peer, &text);
+                send(peer, &item);
             }
         }
     }
 }
 
-fn send(peer: &mut Peer, text: &str) {
-    if peer.has.as_deref() != Some(text) {
-        peer.has = Some(text.to_string());
-        let _ = peer.out.send(HostMsg::Clipboard(text.to_string()));
+/// This computer's clipboard, unless it's private, empty or an oversized image.
+fn read() -> Option<Item> {
+    let item = platform::read()?;
+    if let Item::Image(png) = &item
+        && png.len() > MAX_CLIPBOARD_IMAGE_BYTES
+    {
+        tracing::info!("not sharing a {} MB copied image (too big)", png.len() / 1_000_000);
+        return None;
+    }
+    Some(item)
+}
+
+fn send(peer: &mut Peer, item: &Item) {
+    let fingerprint = item.fingerprint();
+    if peer.has != Some(fingerprint) {
+        peer.has = Some(fingerprint);
+        let _ = peer.out.send(item.message());
     }
 }
 

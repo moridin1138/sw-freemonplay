@@ -15,13 +15,17 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub mod hid;
 pub mod pairing;
 
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 pub const ALPN: &[u8] = b"freemonplay/1";
 pub const SERVICE_TYPE: &str = "_freemonplay._udp.local.";
 pub const DEFAULT_PORT: u16 = 47800;
 
 /// Upper bound on a single framed message, so a bad peer can't make us allocate gigabytes.
 pub const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
+
+/// Larger copied images aren't shared (a full-resolution screenshot of a 5K display is
+/// well under this as PNG).
+pub const MAX_CLIPBOARD_IMAGE_BYTES: usize = 24 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMsg {
@@ -40,6 +44,9 @@ pub enum ClientMsg {
     ReturnControl(ReturnAt),
     /// Text the client's user copied (see [`Hello::clipboard`]).
     Clipboard(String),
+    /// An image the client's user copied, as PNG. Sent on a unidirectional stream of its
+    /// own, so it doesn't hold up input on the control stream.
+    ClipboardImage(Vec<u8>),
 }
 
 /// Where the pointer goes back to the host.
@@ -268,6 +275,9 @@ pub enum HostMsg {
     RemoteLeave,
     /// Text copied on the host (see [`Hello::clipboard`]).
     Clipboard(String),
+    /// An image copied on the host, as PNG, on a unidirectional stream of its own (after
+    /// the video stream, which is always the first).
+    ClipboardImage(Vec<u8>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

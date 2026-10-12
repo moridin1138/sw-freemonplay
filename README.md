@@ -90,7 +90,7 @@ The first run asks for two permissions (System Settings > Privacy & Security), f
 - **Screen & System Audio Recording**, so it can capture the virtual displays. Restart the app or terminal after granting it.
 - **Accessibility**, so clients can control the mouse and keyboard. Without it the screens are view-only.
 
-On each device that should become a screen, install the client from the [latest release](https://github.com/moridin1138/sw-freemonplay/releases/latest): the setup program on Windows (no administrator rights needed), **freemonplay Screen** on a Mac, or the Linux download. Or run a build directly:
+On each device that should become a screen, install the client from the [latest release](https://github.com/moridin1138/sw-freemonplay/releases/latest): the setup program on Windows (no administrator rights needed), the **freemonplay Screen** disk image on a Mac, or the Linux download. Or run a build directly:
 
 ```bash
 ./freemonplay-client
@@ -103,7 +103,7 @@ A window lists the computers running freemonplay on your network. Drag it to the
 - **Keyboard and mouse** (Windows and Mac clients; a Mac needs the Accessibility permission for it): stays the device's own, but the Mac's keyboard and mouse can move onto it, like Universal Control. With a streamed screen too, the Mac's pointer reaches these monitors by leaving that screen toward them, matching the device's own monitor layout. With no screen, they sit beside the Mac's main display, on the side chosen in the host's menu. **Ctrl+Alt+Shift+K** on the Mac takes them back from anywhere; "Mac shortcuts" makes Command act as Ctrl.
 - **Not used.**
 
-Copied text is shared both ways between the Mac and its screens (except passwords copied from password managers); turn it off with **Share Clipboard with Screens** in the Mac's menu or **Share the clipboard with the host** in the client's options.
+Copied text and images are shared both ways between the Mac and its screens (except passwords copied from password managers); turn it off with **Share Clipboard with Screens** in the Mac's menu or **Share the clipboard with the host** in the client's options.
  Hosts on other networks can be reached with **Connect by address**, and **Options** sets full screen, sharpness (1x/2x), codec, vsync and whether to keep the screen awake while connected (on by default).
 
 Useful options:
