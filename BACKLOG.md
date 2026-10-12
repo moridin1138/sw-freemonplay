@@ -13,7 +13,6 @@ Roughly in priority order. Done items move to [CHANGELOG.md](CHANGELOG.md).
   - **Display scaling:** Windows picks 100% for a new 2940x1912 monitor; set a sensible scale for HiDPI clients automatically.
   - **Our own SudoVDA-based driver**, signed via SignPath, for true per-client monitors with stable identities (no fixed count or resolution list).
   - Keyboard and mouse mode with Windows as the host (low-level input hooks).
-  - Clients shouldn't list their own computer when it's also running a host.
 
 ## Next
 
@@ -25,7 +24,6 @@ Roughly in priority order. Done items move to [CHANGELOG.md](CHANGELOG.md).
 
 ## Later
 
-- **Windows host** (extra screens for a Windows PC): bundle an Indirect Display Driver, capture with Windows.Graphics.Capture, hardware encode with Media Foundation/NVENC.
 - **Linux host**: GNOME/KDE/wlroots virtual monitors, PipeWire capture, VAAPI encode.
 - **Android client**: Android tablets as extra screens (MediaCodec decoding).
 - **Linux packaging**: AppImage or Flatpak (bundling GStreamer). The Mac client app and Windows installer are done.
