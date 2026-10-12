@@ -113,8 +113,10 @@ Client: QUIC reader ─▶ sync_channel(4) ─▶ decoder thread ─▶ FrameSlo
 Latency beats completeness everywhere:
 - Both `FrameSlot`s keep only the newest frame. If encoding or display falls behind,
   older frames are skipped rather than queued.
-- If the client's decoder queue is full, the reader drops frames until the next keyframe
-  and asks the host for one.
+- The client's queue to the decoder holds about a second of frames, so the burst that
+  arrives when Wi-Fi recovers from a stall is decoded (milliseconds) rather than dropped;
+  only the newest picture is shown. If frames wait over 300 ms, decoding can't keep up:
+  the client skips to the next keyframe and asks the host for one.
 - The client draws as soon as a frame is decoded (`UserEvent::Frame`), not on the next
   redraw tick.
 

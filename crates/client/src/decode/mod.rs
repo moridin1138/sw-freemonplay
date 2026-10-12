@@ -8,7 +8,7 @@
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, mpsc};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use fmp_proto::{ClientMsg, Codec, VideoFrame};
@@ -129,6 +129,9 @@ impl FrameSlot {
     }
 }
 
+/// How long a frame may wait for the decoder before we give up on catching up.
+const MAX_DECODE_WAIT: Duration = Duration::from_millis(300);
+
 /// `ready` fires once the decoder exists (or failed to start), so the caller can hold off
 /// reading video until then. Starting can take seconds, e.g. GStreamer's first-run plugin scan.
 #[allow(clippy::too_many_arguments)]
@@ -171,7 +174,23 @@ pub fn run(
     tracing::info!("decoding with {}", decoder.name());
     let _ = ready.send(());
     let _ = outgoing.send(ClientMsg::RequestKeyframe);
+    let mut skipping = false;
     for (frame, received_at) in frames {
+        // Frames that waited this long mean decoding can't keep up: skip ahead to a keyframe
+        // rather than show ever older pictures. (A burst after a Wi-Fi stall doesn't wait.)
+        if skipping && !frame.keyframe {
+            continue;
+        }
+        skipping = false;
+        if !frame.keyframe && received_at.elapsed() > MAX_DECODE_WAIT {
+            tracing::info!(
+                "decoding is {} ms behind; skipping to the next keyframe",
+                received_at.elapsed().as_millis()
+            );
+            skipping = true;
+            let _ = outgoing.send(ClientMsg::RequestKeyframe);
+            continue;
+        }
         {
             let mut arrivals = arrivals.lock().unwrap();
             arrivals.push_back((frame.pts_us, received_at));

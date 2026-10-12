@@ -19,7 +19,7 @@ jobs:
     name: macOS (menu bar app + client, universal)
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
       - name: Test
         run: cargo test --workspace --locked
@@ -32,7 +32,7 @@ jobs:
           mkdir -p dist
           ditto -c -k --keepParent target/freemonplay.app dist/freemonplay-macos.zip
           ditto -c -k --keepParent "target/freemonplay Screen.app" dist/freemonplay-screen-macos.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: dist/*
@@ -41,7 +41,7 @@ jobs:
     name: Windows (client)
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
       - name: Test
         run: cargo test --workspace --locked
@@ -60,7 +60,7 @@ jobs:
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp "/DVersion=$version" build\windows\freemonplay.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: dist/*
@@ -70,7 +70,7 @@ jobs:
     # Oldest supported Ubuntu, so the binary runs on 22.04+, Debian 12+ and similar.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install GStreamer development files
         # The runner image's libunwind-14-dev conflicts with the libunwind-dev that
         # libgstreamer1.0-dev needs, so remove it first.
@@ -89,7 +89,7 @@ jobs:
           cp target/release/freemonplay-client LICENSE README.md build/linux/freemonplay-screen.desktop freemonplay-screen/
           cp build/macos/icon/icon-1024.png freemonplay-screen/freemonplay.png
           tar -czf dist/freemonplay-screen-linux-x86_64.tar.gz freemonplay-screen
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: dist/*

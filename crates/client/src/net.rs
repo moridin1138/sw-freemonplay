@@ -306,6 +306,9 @@ pub async fn prepare_with_code(target: &Target, code: String, fingerprint: &str)
     Ok(Prepared::Ready(connected, Credentials::Code(code)))
 }
 
+/// About a second of video at 60 fps.
+const DECODE_QUEUE: usize = 64;
+
 pub struct Session {
     /// Which of the app's displays (windows) this session feeds; tags its events.
     pub view: usize,
@@ -404,8 +407,10 @@ pub async fn run(mut s: Session) -> Result<String> {
         codec: welcome.codec,
     });
 
-    // Small queue: if decoding can't keep up we'd rather skip ahead to a keyframe than lag.
-    let (frame_tx, frame_rx) = std_mpsc::sync_channel::<(VideoFrame, Instant)>(4);
+    // Room for the burst that arrives when Wi-Fi recovers from a stall (decoding clears it
+    // in milliseconds). Whether the decoder is really behind is judged by how long frames
+    // wait (see decode::run), not by how many arrived at once; a full queue is the backstop.
+    let (frame_tx, frame_rx) = std_mpsc::sync_channel::<(VideoFrame, Instant)>(DECODE_QUEUE);
     let mut video = None;
     if !s.input_only {
         video = Some(conn.accept_uni().await?);
@@ -440,7 +445,7 @@ pub async fn run(mut s: Session) -> Result<String> {
             match frame_tx.try_send((frame, Instant::now())) {
                 Ok(()) => {}
                 Err(std_mpsc::TrySendError::Full(_)) => {
-                    tracing::debug!("decoder behind, skipping to next keyframe");
+                    tracing::info!("{DECODE_QUEUE} frames waiting to decode; skipping to the next keyframe");
                     waiting_for_keyframe = true;
                     let _ = s.outgoing_tx.send(ClientMsg::RequestKeyframe);
                 }

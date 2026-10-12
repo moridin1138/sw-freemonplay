@@ -361,7 +361,10 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
             match read_msg::<ClientMsg>(&mut recv).await? {
                 None => return anyhow::Ok(()),
                 Some(ClientMsg::Input(event)) if ctx.settings().allow_input => source.inject(&event),
-                Some(ClientMsg::RequestKeyframe) => slot.request_keyframe(),
+                Some(ClientMsg::RequestKeyframe) => {
+                    tracing::info!("{who}: screen asked for a keyframe");
+                    slot.request_keyframe();
+                }
                 Some(ClientMsg::ReturnControl(at)) => ctx.kvm.return_control(session.id(), at),
                 Some(ClientMsg::Clipboard(text)) => ctx.clipboard.copied_on_client(session.id(), text),
                 Some(ClientMsg::Network(network)) => {

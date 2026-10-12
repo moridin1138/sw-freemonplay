@@ -6,6 +6,16 @@ publishes it as the release notes.
 
 ## [Unreleased]
 
+### Fixed
+- The burst of frames that arrives when Wi-Fi recovers from a stall no longer makes the
+  client drop video and ask for a keyframe (the biggest kind of frame, on a link that had
+  just stalled). It now decodes the burst, which takes milliseconds, and shows the newest
+  picture. It only skips ahead when frames wait over 300 ms for a decoder that can't keep
+  up.
+
+### Changed
+- CI uses the Node 24 versions of GitHub's actions.
+
 ## [0.2.0] - 2026-10-12
 
 Hosts and clients must both be updated: the protocol changed (version 9), and 0.1.0
