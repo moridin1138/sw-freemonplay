@@ -4,7 +4,7 @@ Roughly in priority order. Done items move to [CHANGELOG.md](CHANGELOG.md).
 
 ## In progress
 
-- **Keyboard and mouse mode.** Built (protocol 8) for Windows clients: mixed and keyboard-and-mouse-only layouts, text clipboard, escape shortcut. Needs testing on the Surface. Still to do: macOS clients (CGEvent) and Linux clients (libei or uinput); images and files on the clipboard; clipboard sync for ordinary screen sessions too; a per-client layout editor if "side of the main display" turns out too coarse.
+- **Keyboard and mouse mode.** Built (protocol 8) for Windows clients: mixed and keyboard-and-mouse-only layouts, text clipboard, escape shortcut. Keyboard-and-mouse-only layout tested on the Surface: crossing, return by edge and release on disconnect all work. The mixed layout still needs a client with a second monitor. Still to do: macOS clients (CGEvent) and Linux clients (libei or uinput); images and files on the clipboard; clipboard sync for ordinary screen sessions too; a per-client layout editor if "side of the main display" turns out too coarse.
 - **Several monitors on one client.** Built (protocol 5): each extra monitor is its own session and its own screen on the host. Needs testing with real extra monitors on Windows, and on Mac and Linux clients.
 - **Keep client screens awake.** Tested on macOS. Windows (`SetThreadExecutionState`) and Linux (D-Bus ScreenSaver inhibit, with GNOME session manager fallback) still need checking on real machines.
 
