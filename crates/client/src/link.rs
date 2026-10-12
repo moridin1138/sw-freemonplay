@@ -1,6 +1,8 @@
 //! The network link to the host: tunes it for streaming where the OS allows, and describes
 //! it (Wi-Fi band, signal, link rate) so the host can show what's limiting the stream.
 //!
+//! Described on Windows, macOS and Linux (NetworkManager); tuned on Windows only.
+//!
 //! Windows: Wi-Fi "media streaming mode" stops the adapter dozing between access point
 //! beacons, which otherwise adds tens of milliseconds (and jitter) to every round trip.
 //! It's released when the session ends.
@@ -31,8 +33,13 @@ pub fn tune(host: IpAddr) -> (Option<LinkTuning>, Option<NetworkInfo>) {
     }
 }
 
+#[cfg_attr(not(any(target_os = "windows", target_os = "macos", target_os = "linux")), allow(dead_code))]
+fn wired() -> NetworkInfo {
+    NetworkInfo { summary: "wired (not Wi-Fi)".into(), advice: Vec::new() }
+}
+
 /// Advice for a Wi-Fi link, from its band, signal (0 to 100) and link rate (Mbit/s).
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "windows", target_os = "macos", target_os = "linux")), allow(dead_code))]
 fn wifi_advice(two_point_four: bool, signal: u32, link_mbps: u32) -> Vec<String> {
     let mut advice = Vec::new();
     if two_point_four {
@@ -97,12 +104,12 @@ mod imp {
             let (mut version, mut handle) = (0u32, HANDLE::default());
             if WlanOpenHandle(2, None, &mut version, &mut handle) != 0 {
                 // No WLAN service (a desktop without Wi-Fi): the link isn't Wi-Fi.
-                return Ok((None, Some(wired())));
+                return Ok((None, Some(super::wired())));
             }
             let inner = Inner(handle);
             let mut list: *mut WLAN_INTERFACE_INFO_LIST = null_mut();
             if WlanEnumInterfaces(handle, None, &mut list) != 0 || list.is_null() {
-                return Ok((None, Some(wired())));
+                return Ok((None, Some(super::wired())));
             }
             let count = (*list).dwNumberOfItems as usize;
             let first = (*list).InterfaceInfo.as_ptr();
@@ -110,7 +117,7 @@ mod imp {
                 .map(|i| *first.add(i))
                 .find(|i| i.InterfaceGuid == route_guid && i.isState == wlan_interface_state_connected);
             WlanFreeMemory(list as *const c_void);
-            let Some(wifi) = wifi else { return Ok((None, Some(wired()))) };
+            let Some(wifi) = wifi else { return Ok((None, Some(super::wired()))) };
             let guid = wifi.InterfaceGuid;
 
             let enable: i32 = 1;
@@ -168,13 +175,129 @@ mod imp {
             Ok((streaming.then_some(inner), Some(NetworkInfo { summary, advice })))
         }
     }
+}
 
-    fn wired() -> NetworkInfo {
-        NetworkInfo { summary: "wired (not Wi-Fi)".into(), advice: Vec::new() }
+#[cfg(target_os = "macos")]
+mod imp {
+    //! CoreWLAN, for the Wi-Fi interface, after checking the host is reached through it.
+    //! macOS has no streaming mode to switch on.
+
+    use std::net::IpAddr;
+    use std::process::Command;
+
+    use anyhow::{Context, Result};
+    use fmp_proto::NetworkInfo;
+    use objc2_core_wlan::{CWChannelBand, CWPHYMode, CWWiFiClient};
+
+    pub struct Inner;
+
+    pub fn tune(host: IpAddr) -> Result<(Option<Inner>, Option<NetworkInfo>)> {
+        let route = route_interface(host)?;
+        // SAFETY: read-only CoreWLAN queries.
+        let wifi = unsafe {
+            CWWiFiClient::sharedWiFiClient().interface().filter(|i| {
+                i.serviceActive() && i.interfaceName().is_some_and(|n| n.to_string() == route)
+            })
+        };
+        let Some(wifi) = wifi else { return Ok((None, Some(super::wired()))) };
+        // SAFETY: as above.
+        let (channel, phy, rssi, rate) =
+            unsafe { (wifi.wlanChannel(), wifi.activePHYMode(), wifi.rssiValue(), wifi.transmitRate()) };
+        let generation = match phy {
+            CWPHYMode::Mode11n => "Wi-Fi 4",
+            CWPHYMode::Mode11ac => "Wi-Fi 5",
+            CWPHYMode::Mode11ax => "Wi-Fi 6",
+            CWPHYMode::Mode11a | CWPHYMode::Mode11b | CWPHYMode::Mode11g => "older Wi-Fi",
+            _ => "Wi-Fi",
+        };
+        // SAFETY: as above.
+        let band = channel.map(|c| unsafe { c.channelBand() });
+        let band_name = match band {
+            Some(CWChannelBand::Band2GHz) => ", 2.4 GHz",
+            Some(CWChannelBand::Band5GHz) => ", 5 GHz",
+            Some(CWChannelBand::Band6GHz) => ", 6 GHz",
+            _ => "",
+        };
+        // RSSI as a rough 0 to 100 quality, as Windows reports it (-100 dBm is 0, -50 is 100).
+        let signal = ((rssi + 100) * 2).clamp(0, 100) as u32;
+        let summary = format!("{generation}{band_name}, signal {rssi} dBm, link {rate:.0} Mbit/s");
+        let advice = super::wifi_advice(band == Some(CWChannelBand::Band2GHz), signal, rate as u32);
+        Ok((None, Some(NetworkInfo { summary, advice })))
+    }
+
+    /// The interface the route to `host` uses (e.g. "en0").
+    fn route_interface(host: IpAddr) -> Result<String> {
+        let out = Command::new("/sbin/route").args(["-n", "get", &host.to_string()]).output()?;
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("interface:").map(|i| i.trim().to_string()))
+            .context("no route to the host")
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+mod imp {
+    //! NetworkManager over D-Bus, for the device that routes to the host.
+
+    use std::net::IpAddr;
+
+    use anyhow::{Context, Result};
+    use fmp_proto::NetworkInfo;
+    use zbus::blocking::{Connection, Proxy};
+    use zbus::zvariant::OwnedObjectPath;
+
+    pub struct Inner;
+
+    const NM: &str = "org.freedesktop.NetworkManager";
+    const WIFI_DEVICE: u32 = 2;
+
+    pub fn tune(host: IpAddr) -> Result<(Option<Inner>, Option<NetworkInfo>)> {
+        let IpAddr::V4(v4) = host else { return Ok((None, None)) };
+        let iface = route_interface(v4.octets())?;
+        let bus = Connection::system().context("no D-Bus system bus")?;
+        let nm = Proxy::new(&bus, NM, "/org/freedesktop/NetworkManager", NM)?;
+        let device: OwnedObjectPath = nm.call("GetDeviceByIpIface", &(iface.as_str(),)).context("not managed by NetworkManager")?;
+        let dev = Proxy::new(&bus, NM, device.as_str(), "org.freedesktop.NetworkManager.Device")?;
+        if dev.get_property::<u32>("DeviceType")? != WIFI_DEVICE {
+            return Ok((None, Some(super::wired())));
+        }
+        let wireless = Proxy::new(&bus, NM, device.as_str(), "org.freedesktop.NetworkManager.Device.Wireless")?;
+        let link_mbps = wireless.get_property::<u32>("Bitrate")? / 1000;
+        let ap_path: OwnedObjectPath = wireless.get_property("ActiveAccessPoint")?;
+        let ap = Proxy::new(&bus, NM, ap_path.as_str(), "org.freedesktop.NetworkManager.AccessPoint")?;
+        let mhz = ap.get_property::<u32>("Frequency")?;
+        let signal = ap.get_property::<u8>("Strength")? as u32;
+        let band = match mhz {
+            2400..=2500 => ", 2.4 GHz",
+            5000..=5900 => ", 5 GHz",
+            5925..=7125 => ", 6 GHz",
+            _ => "",
+        };
+        let summary = format!("Wi-Fi{band}, signal {signal}%, link {link_mbps} Mbit/s");
+        let advice = super::wifi_advice((2400..=2500).contains(&mhz), signal, link_mbps);
+        Ok((None, Some(NetworkInfo { summary, advice })))
+    }
+
+    /// The interface whose route to `dest` is most specific, from /proc/net/route.
+    fn route_interface(dest: [u8; 4]) -> Result<String> {
+        let table = std::fs::read_to_string("/proc/net/route")?;
+        let dest = u32::from_ne_bytes(dest);
+        table
+            .lines()
+            .skip(1)
+            .filter_map(|line| {
+                let f: Vec<&str> = line.split_whitespace().collect();
+                let net = u32::from_str_radix(f.get(1)?, 16).ok()?;
+                let mask = u32::from_str_radix(f.get(7)?, 16).ok()?;
+                (dest & mask == net).then(|| (mask.count_ones(), f[0].to_string()))
+            })
+            .max_by_key(|(bits, _)| *bits)
+            .map(|(_, iface)| iface)
+            .context("no route to the host")
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 mod imp {
     use std::net::IpAddr;
 

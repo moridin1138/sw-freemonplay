@@ -13,7 +13,6 @@ Roughly in priority order. Done items move to [CHANGELOG.md](CHANGELOG.md).
 - **Wi-Fi, part 2.** Done: adaptive bitrate, capped send queue, Windows media streaming mode, link diagnostics on both ends. Still to do:
   - **Measured (Mac on 2.4 GHz, Surface on 5 GHz, 2026-10-12):** 0.0% packet loss, but 10 to 45 frames per 2 s delayed by 65 to 500 ms: Wi-Fi stalls, not loss. So forward error correction and reference frame invalidation (planned earlier; VideoToolbox does accept `EnableLTR` on an M4) wouldn't help on this network; revisit only if a network shows real loss. With both on 5 GHz (after moving the Surface off an access point that isolated its clients), delayed frames all but disappeared. Still worth testing: AWDL off on the Mac.
   - Check how often screens still ask for keyframes in normal use (the host now logs each request; one per connection is expected).
-  - Link diagnostics on Mac clients (CoreWLAN) and Linux clients (NetworkManager or `/proc/net/wireless`).
   - Check the adaptive bitrate's thresholds on a busy network (the 2.4 GHz Mac is a good test case).
 - **Zero copy on Linux clients** (VAAPI surfaces as DMA-BUFs into wgpu's Vulkan backend).
 

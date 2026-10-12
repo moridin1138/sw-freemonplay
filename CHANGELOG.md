@@ -6,6 +6,11 @@ publishes it as the release notes.
 
 ## [Unreleased]
 
+### Added
+- Mac and Linux screens report their network link to the host's menu too (Wi-Fi band,
+  signal and link rate, or wired, with tips), as Windows screens already did. Linux uses
+  NetworkManager.
+
 ### Fixed
 - The burst of frames that arrives when Wi-Fi recovers from a stall no longer makes the
   client drop video and ask for a keyframe (the biggest kind of frame, on a link that had

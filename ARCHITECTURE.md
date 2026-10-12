@@ -51,7 +51,7 @@ crates/
     render_metal.rs   macOS zero copy: decoder buffers as Metal textures
     render_d3d12.rs   Windows zero copy: shared D3D textures in wgpu's D3D12 device
     awake.rs          keep the screen on while connected
-    link.rs           the network link: Wi-Fi tuning and description (Windows)
+    link.rs           the network link: described on all three OSes, Wi-Fi tuned on Windows
     kvm.rs            keyboard and mouse mode: pointer tracking, return, Windows injection
     clip.rs           clipboard sharing: poll, send, receive
     input.rs          winit input to protocol events (HID usages, normalised coords)
@@ -187,9 +187,9 @@ and 4 MB (`rate::send_window`). A link slower than the bitrate then stalls the s
 within a frame or two, the encoder skips frames (newest wins) and the bitrate drops,
 instead of seconds of video queueing inside QUIC.
 
-Both ends describe their link for the menu: the client sends `ClientMsg::Network`
-(Windows: the interface that routes to the host, via the WLAN API, which also switches on
-media streaming mode for the session); the host reads its own Wi-Fi with CoreWLAN and
+Both ends describe their link for the menu: the client sends `ClientMsg::Network` for
+the interface that routes to the host (Windows: the WLAN API, which also switches on
+media streaming mode for the session; macOS: CoreWLAN; Linux: NetworkManager over D-Bus); the host reads its own Wi-Fi with CoreWLAN and
 checks whether AWDL is active.
 
 ## Zero copy
