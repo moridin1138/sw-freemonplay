@@ -81,6 +81,8 @@ pub fn uninstall() -> Result<()> {
         // SAFETY: removing a device we just enumerated.
         unsafe { SetupDiCallClassInstaller(DIF_REMOVE, set, Some(data)) }.context("removing the device failed (run this as administrator)")
     })?;
+    // The settings folder we made at install.
+    let _ = std::fs::remove_dir_all(SETTINGS_DIR);
     println!("Removed {removed} virtual display device(s). The driver package stays in Windows' driver store (pnputil /delete-driver removes it).");
     Ok(())
 }

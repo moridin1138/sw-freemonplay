@@ -460,7 +460,13 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
             drop(display);
         }
     }
-    result
+    if closed_on_purpose(&conn) { Ok(()) } else { result }
+}
+
+/// Either side closed the connection on purpose. Streams then fail with "closed", which
+/// isn't an error worth a warning (the session end was already logged with its reason).
+fn closed_on_purpose(conn: &quinn::Connection) -> bool {
+    matches!(conn.close_reason(), Some(quinn::ConnectionError::ApplicationClosed(_) | quinn::ConnectionError::LocallyClosed))
 }
 
 /// The connection dropped out (rather than either side closing it on purpose).
@@ -589,7 +595,7 @@ async fn input_only(
     tracing::info!("{name} ({}): session ended: {}", conn.remote_address(), end_reason(&conn, &result));
     ctx.kvm.unregister(session.id());
     ctx.clipboard.unregister(session.id());
-    result
+    if closed_on_purpose(&conn) { Ok(()) } else { result }
 }
 
 /// Why a session ended, for the log.
