@@ -125,16 +125,56 @@ pub async fn resolve(spec: &str) -> Result<Target> {
 /// Tries each of the target's addresses in turn and returns the first connection.
 pub async fn connect_any(target: &Target) -> Result<Connected> {
     let mut last_error = None;
+    let mut all_silent = true;
     for &addr in &target.addrs {
         match connect(addr).await {
             Ok(c) => return Ok(c),
             Err(e) => {
                 tracing::debug!("{addr}: {e:#}");
+                all_silent &= e.is::<NoAnswer>();
                 last_error = Some(e);
             }
         }
     }
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no addresses to try")))
+    match last_error {
+        Some(_) if all_silent => bail!(no_answer_message(target)),
+        Some(e) => Err(e),
+        None => bail!("no addresses to try"),
+    }
+}
+
+/// The host never replied: nothing came back at all, not even a refusal.
+#[derive(Debug)]
+struct NoAnswer;
+
+impl std::fmt::Display for NoAnswer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("no answer")
+    }
+}
+
+impl std::error::Error for NoAnswer {}
+
+/// What to tell people when a host doesn't answer. A host that's advertising itself is
+/// running, so silence then means the network is dropping traffic between the computers.
+fn no_answer_message(target: &Target) -> String {
+    let addrs: Vec<String> = target.addrs.iter().map(|a| a.ip().to_canonical().to_string()).collect();
+    let at = addrs.join(", ");
+    if target.id.is_some() {
+        format!(
+            "{} is on the network but didn't answer at {at}. Something between the two computers \
+             is blocking direct traffic: often Wi-Fi client (AP) isolation, a guest network, or \
+             isolation between the router's bands or networks. Try putting both on the same \
+             network, or the other band, or use a cable.",
+            target.name
+        )
+    } else {
+        format!(
+            "no answer from {at}. Check that freemonplay is running there and the address is \
+             right. If it is, something on the network may be blocking traffic between the two \
+             computers (Wi-Fi client isolation, a guest network or a firewall)."
+        )
+    }
 }
 
 pub struct Connected {
@@ -173,7 +213,7 @@ pub async fn connect(addr: SocketAddr) -> Result<Connected> {
     endpoint.set_default_client_config(config);
     let conn = tokio::time::timeout(Duration::from_secs(3), endpoint.connect(addr, "freemonplay")?)
         .await
-        .with_context(|| format!("no answer from {addr} (is the host running? firewall?)"))??;
+        .map_err(|_| anyhow::Error::new(NoAnswer))??;
     let fingerprint = seen.lock().unwrap().clone().context("host sent no certificate")?;
     Ok(Connected { endpoint, conn, fingerprint })
 }
@@ -424,6 +464,15 @@ pub async fn run(mut s: Session) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explains_silence() {
+        let addrs = vec!["[::ffff:192.168.0.88]:47800".parse().unwrap()];
+        let found = Target { name: "mac".into(), addrs: addrs.clone(), id: Some("id".into()) };
+        let typed = Target { name: "192.168.0.88".into(), addrs, id: None };
+        assert!(no_answer_message(&found).starts_with("mac is on the network but didn't answer at 192.168.0.88."));
+        assert!(no_answer_message(&typed).contains("Check that freemonplay is running"));
+    }
 
     #[test]
     fn ranks_usable_addresses() {

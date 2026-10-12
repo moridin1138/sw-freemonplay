@@ -10,7 +10,8 @@ Roughly in priority order. Done items move to [CHANGELOG.md](CHANGELOG.md).
 ## Next
 
 - **Wi-Fi, part 2.** Done: adaptive bitrate, capped send queue, Windows media streaming mode, link diagnostics on both ends. Still to do:
-  - Stop one lost packet holding up later frames (QUIC retransmits in order on one stream). Options: forward error correction, or per-frame streams with reference frame invalidation so a late frame can be skipped without a keyframe.
+  - Stop one lost packet holding up later frames (QUIC retransmits in order on one stream). Plan: one QUIC stream per frame, plus reference frame invalidation with VideoToolbox long-term references (`EnableLTR`, accepted for H.264 and HEVC on an M4): the client acknowledges reference frames, and after a loss the host's next frame refers only to an acknowledged one, so the client skips the late frame without waiting or needing a keyframe.
+  - Networks that block traffic between Wi-Fi devices on the same band (seen on a TP-Link router's 5 GHz network): the client now says so; could also suggest the fix in the host's menu.
   - Link diagnostics on Mac clients (CoreWLAN) and Linux clients (NetworkManager or `/proc/net/wireless`).
   - Check the adaptive bitrate's thresholds on a busy network (the 2.4 GHz Mac is a good test case).
 - **Zero copy on Linux clients** (VAAPI surfaces as DMA-BUFs into wgpu's Vulkan backend).

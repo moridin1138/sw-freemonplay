@@ -31,7 +31,14 @@ Hosts and clients must both be updated: the protocol changed (version 6).
 - **`--self-test`** on the client: decodes and draws a built-in clip with this machine's
   decoder and GPU, without a window, and reports which path ran.
 
+### Changed
+- When a host doesn't answer at all, the client explains the likely cause: a host it found
+  on the network but can't reach points to Wi-Fi client isolation, guest networks or
+  isolation between the router's bands, instead of just "no answer".
+
 ### Fixed
+- Adaptive bitrate no longer drops at the start of every session (the first keyframe and
+  screen paint are now ignored for 2 s).
 - Windows client crashed on exit (or when closing the window) once zero copy was active.
 - Windows client never reported latency with zero copy on, so the host's menu kept saying
   "waiting for the screen's first report".

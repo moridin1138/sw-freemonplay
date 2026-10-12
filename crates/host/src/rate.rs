@@ -24,6 +24,9 @@ const STALLED_SHARE: f64 = 0.2;
 /// ...or more than this share of packets was lost (with enough packets to tell).
 const LOSS_SHARE: f64 = 0.05;
 const LOSS_MIN_PACKETS: u64 = 100;
+/// Ignore the start of a session: the first keyframe and the first full-screen paint are
+/// bursts that briefly stall even a fast link.
+const GRACE: Duration = Duration::from_secs(2);
 
 /// What happened during one tick.
 pub struct Sample {
@@ -37,6 +40,7 @@ pub struct Sample {
 }
 
 pub struct RateControl {
+    started: Instant,
     max: u32,
     min: u32,
     current: u32,
@@ -49,7 +53,7 @@ pub struct RateControl {
 impl RateControl {
     pub fn new(max: u32, now: Instant) -> Self {
         let min = (max / MIN_FRACTION).max(FLOOR_BPS).min(max);
-        Self { max, min, current: max, last_decrease: None, calm_since: now, previous: None, loss: 0.0 }
+        Self { started: now, max, min, current: max, last_decrease: None, calm_since: now, previous: None, loss: 0.0 }
     }
 
     pub fn current(&self) -> u32 {
@@ -72,6 +76,9 @@ impl RateControl {
             None => (0, 0),
         };
         self.loss = if sent > 0 { lost as f64 / sent as f64 } else { 0.0 };
+        if now.duration_since(self.started) < GRACE {
+            return None;
+        }
         let stalled = !s.elapsed.is_zero() && s.stalled.as_secs_f64() / s.elapsed.as_secs_f64() > STALLED_SHARE;
         let lossy = sent >= LOSS_MIN_PACKETS && self.loss > LOSS_SHARE;
 
@@ -114,7 +121,9 @@ mod tests {
     fn backs_off_when_stalled_then_recovers() {
         let t0 = Instant::now();
         let mut rc = RateControl::new(30_000_000, t0);
-        assert_eq!(rc.update(t0, &sample(0, 0, 0)), None);
+        // The start-up burst is ignored.
+        assert_eq!(rc.update(t0 + TICK, &sample(400, 0, 0)), None);
+        let t0 = t0 + GRACE;
         // Stalled half the time: cut once, not again within a second.
         assert_eq!(rc.update(t0 + TICK, &sample(250, 0, 0)), Some(21_000_000));
         assert_eq!(rc.update(t0 + TICK * 2, &sample(250, 0, 0)), None);
@@ -146,6 +155,7 @@ mod tests {
     fn loss_counts_only_with_enough_packets() {
         let t0 = Instant::now();
         let mut rc = RateControl::new(20_000_000, t0);
+        let t0 = t0 + GRACE;
         rc.update(t0, &sample(0, 1000, 0));
         // 10 of 50 lost: too few packets to judge.
         assert_eq!(rc.update(t0 + TICK, &sample(0, 1050, 10)), None);

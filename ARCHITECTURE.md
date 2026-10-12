@@ -112,7 +112,8 @@ Latency beats completeness everywhere:
 
 ## Adapting to the network
 
-`host/src/rate.rs`. Every 500 ms the sender feeds a `RateControl` with how long writes to
+`host/src/rate.rs`. After a 2 s grace period (the first keyframe and screen paint are
+bursts), every 500 ms the sender feeds a `RateControl` with how long writes to
 QUIC stalled (keyframes excluded: they're big by design) and quinn's sent and lost packet
 counts. More than 20% of the time stalled, or more than 5% of packets lost, cuts the
 bitrate by 30% (at most once a second, down to an eighth of the maximum or 1.5 Mbit/s);
