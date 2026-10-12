@@ -282,7 +282,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         let mut first = true;
         let mut rate = RateControl::new(bitrate, Instant::now());
         conn.set_send_window(rate::send_window(bitrate, conn.rtt()));
-        let (mut tick, mut stalled) = (Instant::now(), Duration::ZERO);
+        let (mut tick, mut stalled, mut tick_bytes) = (Instant::now(), Duration::ZERO, 0u64);
         while let Some((frame, captured_at)) = rx.recv().await {
             if std::mem::take(&mut first) {
                 tracing::info!("{who}: first frame sent after {} ms", started.elapsed().as_millis());
@@ -293,6 +293,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
             if !keyframe {
                 stalled += write_started.elapsed();
             }
+            tick_bytes += bytes as u64;
             stats.add(bytes, captured_at.elapsed());
             stats.maybe_report(&who, &session, conn.rtt(), rate.loss());
 
@@ -301,6 +302,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
                 let sample = rate::Sample {
                     elapsed: tick.elapsed(),
                     stalled,
+                    bytes: tick_bytes,
                     sent_packets: path.sent_packets,
                     lost_packets: path.lost_packets,
                 };
@@ -311,7 +313,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
                 }
                 conn.set_send_window(rate::send_window(rate.current(), path.rtt));
                 session.update_rate(rate.current(), rate.max(), rate.loss());
-                (tick, stalled) = (Instant::now(), Duration::ZERO);
+                (tick, stalled, tick_bytes) = (Instant::now(), Duration::ZERO, 0);
             }
         }
         anyhow::Ok(())

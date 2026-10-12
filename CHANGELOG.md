@@ -40,6 +40,10 @@ Hosts and clients must both be updated: the protocol changed (version 7).
   isolation between the router's bands, instead of just "no answer".
 
 ### Fixed
+- Adaptive bitrate no longer mistakes Wi-Fi stalls for a slow link. On a busy 2.4 GHz
+  network it had cut the bitrate to under 4 Mbit/s while only about 3 Mbit/s was being
+  sent, lowering quality with no gain. Stalls now count only when the link is carrying
+  most of the bitrate, or when they last 2 s or more.
 - Adaptive bitrate no longer drops at the start of every session (the first keyframe and
   screen paint are now ignored for 2 s).
 - Windows client crashed on exit (or when closing the window) once zero copy was active.
