@@ -338,6 +338,10 @@ pub struct Session {
     pub proxy: EventLoopProxy<UserEvent>,
 }
 
+/// How long without a single packet from the host before telling the person the connection
+/// is interrupted.
+const INTERRUPTED_AFTER: Duration = Duration::from_millis(3500);
+
 /// Runs until the connection ends. Returns a human readable reason.
 pub async fn run(mut s: Session) -> Result<String> {
     let conn = s.connected.conn.clone();
@@ -532,9 +536,32 @@ pub async fn run(mut s: Session) -> Result<String> {
         std::future::pending().await
     };
 
+    // Nothing at all from the host for a few seconds (not even keepalives, which come at
+    // least every 2 s) means the network has dropped out: say so straight away rather than
+    // leaving a frozen picture until the connection times out.
+    let watch = async {
+        let (view, proxy) = (s.view, s.proxy.clone());
+        let mut last = (conn.stats().udp_rx.datagrams, Instant::now());
+        let mut interrupted = false;
+        loop {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let received = conn.stats().udp_rx.datagrams;
+            if received != last.0 {
+                last = (received, Instant::now());
+            }
+            let silent = last.1.elapsed() >= INTERRUPTED_AFTER;
+            if silent != interrupted {
+                interrupted = silent;
+                tracing::info!("connection {}", if silent { "interrupted" } else { "back" });
+                let _ = proxy.send_event(UserEvent::Interrupted { view, interrupted });
+            }
+        }
+    };
+
     tokio::select! {
         () = clipboard => unreachable!("the clipboard loop never ends"),
         () = images => unreachable!("the image loop never ends"),
+        () = watch => unreachable!("the watch loop never ends"),
         r = reader => r.map(|()| "host stopped streaming".to_string()),
         r = writer => r.map(|()| "closed".to_string()),
         r = notices => r.map(|()| "closed".to_string()),

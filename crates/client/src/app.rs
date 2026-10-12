@@ -61,6 +61,8 @@ pub enum UserEvent {
     Closed { view: usize, reason: String, lost: bool },
     /// Reconnecting after a dropped connection didn't work in time.
     ReconnectFailed,
+    /// Nothing heard from the host for a few seconds (or heard again).
+    Interrupted { view: usize, interrupted: bool },
 }
 
 /// From the command line; used once at startup.
@@ -172,6 +174,8 @@ pub struct App {
     toolbar: ToolbarState,
     /// Trying to get back to the host after the connection dropped out, until then.
     reconnecting: Option<Instant>,
+    /// The main session hasn't heard from the host for a few seconds.
+    interrupted: bool,
     /// The main screen's host and stream, for the toolbar.
     host_name: String,
     /// Size and codec.
@@ -227,6 +231,7 @@ impl App {
             hint_until: None,
             toolbar: ToolbarState::default(),
             reconnecting: None,
+            interrupted: false,
             host_name: String::new(),
             stream_detail: String::new(),
             shown_fps: None,
@@ -687,6 +692,7 @@ impl App {
     fn start_reconnecting(&mut self) {
         let Some(target) = self.target.clone() else { return self.leave_stream() };
         self.close_extras();
+        self.interrupted = false;
         self.reconnecting = Some(Instant::now() + RECONNECT_FOR);
         self.toolbar = ToolbarState::default();
         let (store, proxy) = (self.store.clone(), self.proxy.clone());
@@ -769,6 +775,7 @@ impl App {
         self.hint_until = None;
         self.toolbar = ToolbarState::default();
         self.reconnecting = None;
+        self.interrupted = false;
         self.target = None;
     }
 
@@ -867,8 +874,10 @@ impl App {
             self.toolbar = ToolbarState::default();
         }
         let reconnecting = if view == MAIN { self.reconnecting } else { None };
-        let hint = view == MAIN && self.hint_until.is_some_and(|t| now < t) && !self.toolbar.shown && reconnecting.is_none();
-        let toolbar = view == MAIN && self.toolbar.shown && reconnecting.is_none();
+        let interrupted = view == MAIN && self.interrupted && reconnecting.is_none();
+        let overlay = reconnecting.is_some() || interrupted;
+        let hint = view == MAIN && self.hint_until.is_some_and(|t| now < t) && !self.toolbar.shown && !overlay;
+        let toolbar = view == MAIN && self.toolbar.shown && !overlay;
         let Some(display) = self.displays.get_mut(&view) else { return };
         let new_frame = display.frames.take();
         if let Some(frame) = &new_frame {
@@ -877,7 +886,7 @@ impl App {
         let fullscreen = display.window.fullscreen().is_some();
         let mut action = None;
         let mut stop = false;
-        if (hint || toolbar || reconnecting.is_some()) && let Some(state) = self.egui_state.as_mut() {
+        if (hint || toolbar || overlay) && let Some(state) = self.egui_state.as_mut() {
             let window = display.window.clone();
             let raw = state.take_egui_input(&window);
             let ctx = self.egui_ctx.clone();
@@ -890,7 +899,10 @@ impl App {
             let output = ctx.run_ui(raw, |ui| {
                 if let Some(until) = reconnecting {
                     let left = until.saturating_duration_since(now).as_secs() + 1;
-                    stop = ui::reconnecting(ui.ctx(), bar.host, left);
+                    stop = ui::reconnecting(ui.ctx(), bar.host, Some(left));
+                    ui.ctx().request_repaint_after(Duration::from_millis(500));
+                } else if interrupted {
+                    stop = ui::reconnecting(ui.ctx(), bar.host, None);
                     ui.ctx().request_repaint_after(Duration::from_millis(500));
                 } else if toolbar {
                     let (clicked, area) = ui::toolbar(ui.ctx(), &bar);
@@ -908,8 +920,11 @@ impl App {
             display.renderer.render(None);
         }
         if stop {
-            let message = t!("screen.message.disconnected_from", host = self.host_name).into_owned();
-            return self.stop_reconnecting(message);
+            if self.reconnecting.is_some() {
+                let message = t!("screen.message.disconnected_from", host = self.host_name).into_owned();
+                return self.stop_reconnecting(message);
+            }
+            return self.disconnect();
         }
         match action {
             Some(ui::ToolbarAction::Disconnect) => return self.disconnect(),
@@ -1021,7 +1036,7 @@ impl App {
         if self.host_in_control.load(Ordering::Relaxed) && !matches!(event, WindowEvent::Focused(_)) {
             return;
         }
-        if view == MAIN && self.reconnecting.is_some() {
+        if view == MAIN && (self.reconnecting.is_some() || self.interrupted) {
             // Nothing to send to; the pointer is for the Stop button.
             if let (Some(window), Some(state)) = (self.main().map(|d| d.window.clone()), self.egui_state.as_mut())
                 && state.on_window_event(&window, &event).repaint
@@ -1128,6 +1143,15 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             UserEvent::Closed { view, reason, lost } => self.on_closed(view, reason, lost),
+            UserEvent::Interrupted { view, interrupted } => {
+                if view == MAIN && self.streaming() {
+                    self.interrupted = interrupted;
+                    if let Some(main) = self.main() {
+                        main.window.set_cursor_visible(interrupted);
+                    }
+                    self.redraw();
+                }
+            }
             UserEvent::ReconnectFailed => {
                 let message = t!("screen.message.lost", host = self.host_name).into_owned();
                 self.stop_reconnecting(message);

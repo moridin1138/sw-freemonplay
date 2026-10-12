@@ -53,8 +53,9 @@ Hosts and screens must both be updated: the protocol changed (version 11).
   size it would there. Before, Windows picked 100% for a new 2940x1912 monitor, and
   everything was tiny. Screens now tell the host their scale (protocol 11).
 - **Riding out dropped connections:** when a screen's connection drops out (Wi-Fi gone for
-  more than a few seconds, a laptop roaming), the screen keeps the last picture and
-  reconnects by itself for 15 s, with a Stop button. The host keeps that screen's display
+  more than a few seconds, a laptop roaming), the screen says so within a few seconds
+  ("Connection interrupted"), keeps the last picture and reconnects by itself for 15 s,
+  with a Stop button. The host keeps that screen's display
   meanwhile, so the windows on it stay where they were instead of jumping to the main
   display. Disconnecting on purpose still removes it straight away.
 - **A setup window on the Mac host:** on first launch (and whenever Screen Recording is

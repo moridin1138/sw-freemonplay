@@ -67,7 +67,9 @@ screen.toolbar.exit_fullscreen: "Vollbild beenden"
 screen.hint.toolbar: "Für die Symbolleiste auf den oberen Rand zeigen · %{keys} trennt"
 screen.hint.keys: "%{disconnect} trennt · %{fullscreen} schaltet Vollbild um"
 
-screen.reconnect.lost: "Verbindung zu %{host} unterbrochen"
+screen.reconnect.interrupted: "Verbindung zu %{host} unterbrochen"
+screen.reconnect.waiting: "Warte auf das Netzwerk…"
+screen.reconnect.lost: "Verbindung zu %{host} verloren"
 screen.reconnect.trying: "Verbinde erneut… %{seconds} s"
 screen.reconnect.stop: "Stopp"
 

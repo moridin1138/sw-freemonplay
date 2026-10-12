@@ -67,6 +67,8 @@ screen.toolbar.exit_fullscreen: "退出全屏"
 screen.hint.toolbar: "指向顶部边缘显示工具栏 · %{keys} 断开连接"
 screen.hint.keys: "%{disconnect} 断开连接 · %{fullscreen} 切换全屏"
 
+screen.reconnect.interrupted: "与 %{host} 的连接中断"
+screen.reconnect.waiting: "正在等待网络…"
 screen.reconnect.lost: "与 %{host} 的连接已断开"
 screen.reconnect.trying: "正在重新连接… %{seconds} 秒"
 screen.reconnect.stop: "停止"

@@ -67,6 +67,8 @@ screen.toolbar.exit_fullscreen: "Salir de pantalla completa"
 screen.hint.toolbar: "Lleva el puntero arriba para ver la barra · %{keys} desconecta"
 screen.hint.keys: "%{disconnect} desconecta · %{fullscreen} alterna pantalla completa"
 
+screen.reconnect.interrupted: "Conexión con %{host} interrumpida"
+screen.reconnect.waiting: "Esperando a la red…"
 screen.reconnect.lost: "Se perdió la conexión con %{host}"
 screen.reconnect.trying: "Reconectando… %{seconds} s"
 screen.reconnect.stop: "Detener"

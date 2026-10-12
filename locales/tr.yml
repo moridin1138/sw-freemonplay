@@ -67,6 +67,8 @@ screen.toolbar.exit_fullscreen: "Tam Ekrandan Çık"
 screen.hint.toolbar: "Araç çubuğu için üst kenara gelin · %{keys} bağlantıyı keser"
 screen.hint.keys: "%{disconnect} bağlantıyı keser · %{fullscreen} tam ekranı açar/kapatır"
 
+screen.reconnect.interrupted: "%{host} bağlantısı kesintiye uğradı"
+screen.reconnect.waiting: "Ağ bekleniyor…"
 screen.reconnect.lost: "%{host} ile bağlantı koptu"
 screen.reconnect.trying: "Yeniden bağlanılıyor… %{seconds} sn"
 screen.reconnect.stop: "Durdur"

@@ -249,9 +249,9 @@ pub fn toolbar(ctx: &egui::Context, bar: &Toolbar) -> (Option<ToolbarAction>, eg
     (action, area.response.rect)
 }
 
-/// After the connection dropped out: what's happening, and a way to stop. Returns whether
-/// Stop was clicked.
-pub fn reconnecting(ctx: &egui::Context, host: &str, seconds_left: u64) -> bool {
+/// The connection is interrupted (`seconds_left` None: waiting to hear from the host again)
+/// or dropped out (reconnecting, with the time left). Returns whether Stop was clicked.
+pub fn reconnecting(ctx: &egui::Context, host: &str, seconds_left: Option<u64>) -> bool {
     let mut stop = false;
     egui::Area::new(egui::Id::new("reconnecting")).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
         egui::Frame::new()
@@ -264,11 +264,16 @@ pub fn reconnecting(ctx: &egui::Context, host: &str, seconds_left: u64) -> bool 
                 ui.horizontal(|ui| {
                     ui.spinner();
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(t!("screen.reconnect.lost", host = host)).strong());
-                        ui.label(RichText::new(t!("screen.reconnect.trying", seconds = seconds_left)).color(MUTED));
+                        let (title, detail) = match seconds_left {
+                            Some(seconds) => (t!("screen.reconnect.lost", host = host), t!("screen.reconnect.trying", seconds = seconds)),
+                            None => (t!("screen.reconnect.interrupted", host = host), t!("screen.reconnect.waiting")),
+                        };
+                        ui.label(RichText::new(title).strong());
+                        ui.label(RichText::new(detail).color(MUTED));
                     });
                     ui.add_space(16.0);
-                    stop = ui.add(egui::Button::new(t!("screen.reconnect.stop")).min_size(vec2(80.0, 32.0))).clicked();
+                    let label = if seconds_left.is_some() { t!("screen.reconnect.stop") } else { t!("screen.disconnect") };
+                    stop = ui.add(egui::Button::new(label).min_size(vec2(80.0, 32.0))).clicked();
                 });
             });
     });

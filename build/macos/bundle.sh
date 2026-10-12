@@ -121,6 +121,9 @@ else
     echo "Ad-hoc signed. Permissions reset on each rebuild; run build/macos/make-signing-identity.sh once to fix that."
 fi
 echo "Built $app"
+# Keep the build copy out of Launch Services, so Spotlight, Launchpad and the Dock only ever
+# find the installed app (two registered copies with the same ID show up as question marks).
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$app" 2>/dev/null || true
 
 if $install; then
     dest="/Applications/$name.app"

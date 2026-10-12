@@ -69,6 +69,8 @@ screen.toolbar.exit_fullscreen: "Exit Full Screen"
 screen.hint.toolbar: "Point at the top edge for the toolbar · %{keys} disconnects"
 screen.hint.keys: "%{disconnect} disconnects · %{fullscreen} toggles full screen"
 
+screen.reconnect.interrupted: "Connection to %{host} interrupted"
+screen.reconnect.waiting: "Waiting for the network…"
 screen.reconnect.lost: "Connection to %{host} lost"
 screen.reconnect.trying: "Reconnecting… %{seconds} s"
 screen.reconnect.stop: "Stop"
