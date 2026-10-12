@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use fmp_proto::{
     Auth, ClientMsg, Codec, DisplayRequest, Hello, HostMsg, InputEvent, PROTOCOL_VERSION, RejectKind, VideoFrame,
     Welcome,
-    decode, peek_hello_protocol, read_frame, read_msg, write_msg,
+    decode, pairing, peek_hello_protocol, read_frame, read_msg, write_msg,
 };
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -27,6 +27,8 @@ pub struct Ctx {
     pub port: u16,
     pub endpoint: quinn::Endpoint,
     pub registry: Arc<Registry>,
+    /// Withdrawn on shutdown so clients drop us from their lists immediately.
+    pub advertisement: Mutex<Option<crate::Advertisement>>,
     /// Saved settings, changed from the menu bar. New sessions pick up changes.
     settings: Mutex<Settings>,
     /// From the command line; win over `settings` for this run and aren't saved.
@@ -62,6 +64,7 @@ impl Ctx {
             host_name,
             endpoint,
             registry: Arc::default(),
+            advertisement: Mutex::new(None),
             settings: Mutex::new(settings),
             overrides,
             bitrate_bps,
@@ -95,6 +98,9 @@ impl Ctx {
 
     /// Disconnects everyone (unplugging their virtual displays) and stops accepting.
     pub fn shutdown(&self) {
+        if let Some(ad) = self.advertisement.lock().unwrap().take() {
+            ad.withdraw();
+        }
         self.endpoint.close(0u32.into(), b"host shutting down");
     }
 }
@@ -150,9 +156,20 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     };
     let who = format!("{} ({})", hello.client_name, conn.remote_address());
 
-    let issued_token = match authenticate(&ctx, &hello) {
-        Ok(token) => token,
-        Err((kind, reason)) => return reject(&conn, &mut send, &who, kind, reason).await,
+    let issued_token = match &hello.auth {
+        Auth::Token(token) if ctx.store.check_token(&hello.client_id, token) => None,
+        Auth::Token(_) => {
+            let reason = "this host doesn't know you any more; pair again with its code".to_string();
+            return reject(&conn, &mut send, &who, RejectKind::NotPaired, reason).await;
+        }
+        Auth::Pake(client_msg) => match pair(&ctx, &conn, &mut send, &mut recv, client_msg, &hello).await {
+            Ok(token) => Some(token),
+            Err(e) => {
+                ctx.store.pairing_failed();
+                tracing::debug!("{who}: pairing failed: {e:#}");
+                return reject(&conn, &mut send, &who, RejectKind::WrongCode, "wrong pairing code".into()).await;
+            }
+        },
     };
     if issued_token.is_some() {
         tracing::info!("paired with {who}");
@@ -335,23 +352,36 @@ async fn reject(
     kind: RejectKind,
     reason: String,
 ) -> Result<()> {
-    write_msg(send, &HostMsg::Rejected { reason: reason.clone(), kind }).await?;
-    send.finish()?;
+    // Best effort: the client may already have hung up (e.g. it rejected our pairing proof).
+    let _ = write_msg(send, &HostMsg::Rejected { reason: reason.clone(), kind }).await;
+    let _ = send.finish();
     // Give the rejection time to arrive before the connection drops.
     let _ = timeout(Duration::from_secs(2), conn.closed()).await;
     bail!("{who} rejected: {reason}");
 }
 
-/// Returns a newly issued token when the client paired with a code, `None` for a known client.
-fn authenticate(ctx: &Ctx, hello: &Hello) -> Result<Option<Vec<u8>>, (RejectKind, String)> {
-    match &hello.auth {
-        Auth::Token(token) if ctx.store.check_token(&hello.client_id, token) => Ok(None),
-        Auth::Token(_) => {
-            Err((RejectKind::NotPaired, "this host doesn't know you any more; pair again with its code".into()))
+/// Pairing steps 2 to 4 (see `fmp_proto::pairing`): answer the client's SPAKE2 message,
+/// prove we know the code, and check the client's proof. Returns the client's new token.
+async fn pair(
+    ctx: &Ctx,
+    conn: &quinn::Connection,
+    send: &mut quinn::SendStream,
+    recv: &mut quinn::RecvStream,
+    client_msg: &[u8],
+    hello: &Hello,
+) -> Result<Vec<u8>> {
+    let (state, host_msg) = pairing::Pairing::host(&ctx.store.pairing_code());
+    let key = state.finish(client_msg)?;
+    let binding = pairing::channel_binding(conn)?;
+    let proof = key.confirmation(pairing::Role::Host, &binding);
+    write_msg(send, &HostMsg::PairingChallenge { pake: host_msg, proof }).await?;
+    match timeout(HANDSHAKE_TIMEOUT, read_msg::<ClientMsg>(recv)).await {
+        Ok(Ok(Some(ClientMsg::PairingProof(proof)))) if key.verify(pairing::Role::Client, &binding, &proof) => {
+            Ok(ctx.store.complete_pairing(&hello.client_id, &hello.client_name))
         }
-        Auth::PairingCode(code) => {
-            ctx.store.pair(&hello.client_id, &hello.client_name, code).map(Some).map_err(|e| (RejectKind::WrongCode, e))
-        }
+        Ok(Ok(Some(ClientMsg::PairingProof(_)))) => bail!("client's proof doesn't match"),
+        Ok(Ok(_)) | Ok(Err(_)) => bail!("client gave up (wrong code, or an interrupted connection)"),
+        Err(_) => bail!("client didn't answer in time"),
     }
 }
 

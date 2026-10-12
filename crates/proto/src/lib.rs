@@ -13,8 +13,9 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub mod hid;
+pub mod pairing;
 
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 pub const ALPN: &[u8] = b"freemonplay/1";
 pub const SERVICE_TYPE: &str = "_freemonplay._udp.local.";
 pub const DEFAULT_PORT: u16 = 47800;
@@ -30,6 +31,8 @@ pub enum ClientMsg {
     RequestKeyframe,
     /// Sent every couple of seconds so the host can show latency and frame rate.
     Stats(ClientStats),
+    /// Pairing step 3: the client's proof (see [`pairing`]).
+    PairingProof(Vec<u8>),
 }
 
 /// What the client measured over the last reporting window, on its own clock.
@@ -104,8 +107,9 @@ impl Codec {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Auth {
-    /// First connection: the 6 digit code the host prints at startup.
-    PairingCode(String),
+    /// First connection: pairing step 1, a SPAKE2 message derived from the host's 6 digit
+    /// code (the code itself is never sent; see [`pairing`]).
+    Pake(Vec<u8>),
     /// Later connections: the token the host issued when we paired.
     Token(Vec<u8>),
 }
@@ -132,6 +136,8 @@ pub enum HostMsg {
     /// Something the user should know about after the session started (e.g. no frames
     /// are being captured). Informational; the session continues.
     Notice { message: String },
+    /// Pairing step 2: the host's SPAKE2 message and its proof (see [`pairing`]).
+    PairingChallenge { pake: Vec<u8>, proof: Vec<u8> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -271,7 +277,7 @@ mod tests {
             protocol: PROTOCOL_VERSION,
             client_id: "id".into(),
             client_name: "name".into(),
-            auth: Auth::PairingCode("123456".into()),
+            auth: Auth::Pake(vec![1; 33]),
             display: DisplayRequest { width: 1920, height: 1080, refresh_hz: 60, hidpi: false, size_mm: None },
             codecs: vec![Codec::H265, Codec::H264],
         });

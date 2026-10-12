@@ -4,6 +4,7 @@ description = "Shows a freemonplay virtual display full screen and sends input b
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 fmp-proto.workspace = true
@@ -24,6 +25,9 @@ bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 wgpu = "30"
 winit = "0.30"
+egui = "0.36"
+egui-wgpu = "0.36"
+egui-winit = "0.36"
 
 # Each OS decodes with its own H.264 decoder (see src/decode). Linux keeps bundled
 # OpenH264 as a last resort for systems without GStreamer's H.264 plugins.

@@ -103,7 +103,9 @@ fn main() -> Result<()> {
     let overrides = Overrides { max_fps: args.max_fps, codec: args.codec, no_input: args.no_input };
     let bitrate = args.bitrate_mbps.map(|m| (m * 1e6) as u32);
     let ctx = Arc::new(Ctx::new(store, host_name, endpoint, overrides, bitrate, args.encoder, args.test_pattern)?);
-    let _mdns = if args.no_mdns { None } else { Some(advertise(&ctx.store.host_id, &ctx.host_name, ctx.port)?) };
+    if !args.no_mdns {
+        *ctx.advertisement.lock().unwrap() = Some(advertise(&ctx.store.host_id, &ctx.host_name, ctx.port)?);
+    }
 
     tracing::info!("freemonplay host \"{}\" listening on UDP port {}", ctx.host_name, ctx.port);
     if !gui {
@@ -184,7 +186,23 @@ fn make_endpoint(store: &HostStore, port: u16) -> Result<quinn::Endpoint> {
     quinn::Endpoint::server(config, addr).with_context(|| format!("can't listen on UDP port {port}"))
 }
 
-fn advertise(host_id: &str, name: &str, port: u16) -> Result<mdns_sd::ServiceDaemon> {
+/// Our mDNS announcement. Withdrawing it tells clients right away that we've gone, rather
+/// than leaving a stale entry in their host lists until it expires.
+pub struct Advertisement {
+    daemon: mdns_sd::ServiceDaemon,
+    fullname: String,
+}
+
+impl Advertisement {
+    pub fn withdraw(self) {
+        if let Ok(done) = self.daemon.unregister(&self.fullname) {
+            let _ = done.recv_timeout(Duration::from_millis(500));
+        }
+        let _ = self.daemon.shutdown();
+    }
+}
+
+fn advertise(host_id: &str, name: &str, port: u16) -> Result<Advertisement> {
     let mdns = mdns_sd::ServiceDaemon::new()?;
     // Only advertise LAN IPv4 addresses. Loopback is useless to other machines, and IPv6
     // link-local addresses (e.g. macOS's fe80::1 on lo0) can't be dialled without a scope id.
@@ -193,8 +211,9 @@ fn advertise(host_id: &str, name: &str, port: u16) -> Result<mdns_sd::ServiceDae
     let version = PROTOCOL_VERSION.to_string();
     let props = [("id", host_id), ("name", name), ("proto", version.as_str())];
     let info = mdns_sd::ServiceInfo::new(SERVICE_TYPE, name, &host, "", port, &props[..])?.enable_addr_auto();
+    let fullname = info.get_fullname().to_string();
     mdns.register(info)?;
-    Ok(mdns)
+    Ok(Advertisement { daemon: mdns, fullname })
 }
 
 fn probe_display(size: &str) -> Result<()> {

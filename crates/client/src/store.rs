@@ -20,6 +20,9 @@ struct Data {
 pub struct KnownHost {
     pub name: String,
     pub token_hex: String,
+    /// The host's advertised id, so the host list can show which ones are paired.
+    #[serde(default)]
+    pub host_id: Option<String>,
 }
 
 pub struct ClientStore {
@@ -31,10 +34,7 @@ impl ClientStore {
     pub fn open(dir: Option<PathBuf>) -> Result<Self> {
         let dir = match dir {
             Some(d) => d,
-            None => directories::ProjectDirs::from("com", "forwardedu", "freemonplay")
-                .context("no home directory")?
-                .config_dir()
-                .join("client"),
+            None => default_config_dir("client")?,
         };
         std::fs::create_dir_all(&dir)?;
         let path = dir.join("client.json");
@@ -58,11 +58,15 @@ impl ClientStore {
         self.data.hosts.get(fingerprint)
     }
 
-    pub fn remember(&mut self, fingerprint: &str, name: &str, token: &[u8]) -> Result<()> {
-        self.data
-            .hosts
-            .insert(fingerprint.to_string(), KnownHost { name: name.to_string(), token_hex: hex(token) });
+    pub fn remember(&mut self, fingerprint: &str, name: &str, host_id: &str, token: &[u8]) -> Result<()> {
+        let host = KnownHost { name: name.to_string(), token_hex: hex(token), host_id: Some(host_id.to_string()) };
+        self.data.hosts.insert(fingerprint.to_string(), host);
         self.save()
+    }
+
+    /// Whether we've paired with the host advertising this id.
+    pub fn is_paired(&self, host_id: &str) -> bool {
+        self.data.hosts.values().any(|h| h.host_id.as_deref() == Some(host_id))
     }
 
     pub fn forget(&mut self, fingerprint: &str) -> Result<()> {
@@ -79,6 +83,25 @@ impl ClientStore {
         }
         Ok(())
     }
+}
+
+/// This app's config folder. Moves the folder over from the old `com.forwardedu` identifier
+/// the first time, so existing pairings and settings carry over.
+fn default_config_dir(sub: &str) -> Result<PathBuf> {
+    let dir = directories::ProjectDirs::from("io", "github.moridin1138", "freemonplay")
+        .context("no home directory")?
+        .config_dir()
+        .join(sub);
+    if !dir.exists()
+        && let Some(old) = directories::ProjectDirs::from("com", "forwardedu", "freemonplay")
+        && old.config_dir().join(sub).exists()
+    {
+        let old = old.config_dir().join(sub);
+        std::fs::create_dir_all(dir.parent().context("config dir has no parent")?)?;
+        std::fs::rename(&old, &dir).with_context(|| format!("moving {} to {}", old.display(), dir.display()))?;
+        tracing::info!("moved config from {} to {}", old.display(), dir.display());
+    }
+    Ok(dir)
 }
 
 pub fn hex(bytes: &[u8]) -> String {

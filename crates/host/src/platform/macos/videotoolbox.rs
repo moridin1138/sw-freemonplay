@@ -377,7 +377,15 @@ mod tests {
     /// Encodes a forced keyframe then a P-frame; the keyframe must lead with `first_nal`.
     fn encode_two_frames(codec: Codec, first_nal: u8) {
         let (w, h) = (640usize, 480usize);
-        let mut enc = VtEncoder::new(codec, w as u32, h as u32, 30, 2_000_000).expect("VideoToolbox session");
+        let mut enc = match VtEncoder::new(codec, w as u32, h as u32, 30, 2_000_000) {
+            Ok(enc) => enc,
+            // CI's macOS virtual machines may have no hardware encoder.
+            Err(e) if std::env::var_os("CI").is_some() => {
+                eprintln!("skipping {codec} hardware encode test: {e:#}");
+                return;
+            }
+            Err(e) => panic!("VideoToolbox session: {e:#}"),
+        };
         let frame = |shade: u8| {
             Frame::I420(I420Frame {
                 width: w,

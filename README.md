@@ -92,15 +92,15 @@ On each device that should become a screen:
 ./freemonplay-client
 ```
 
-It finds hosts on the LAN, asks for the pairing code the first time, then goes full screen. After pairing it reconnects without a code.
+A window lists the computers running freemonplay on your network. Drag it to the monitor you want to use, click **Connect**, and enter the pairing code shown in the host's menu the first time (after that it reconnects without one). The screen fills that monitor; disconnecting brings the list back. Hosts on other networks can be reached with **Connect by address**, and **Options** sets full screen, sharpness (1x/2x), codec and vsync.
 
 Useful options:
 
 | | |
 |---|---|
-| `client --host 192.168.1.20` | Connect directly (skip discovery, e.g. across subnets) |
-| `client --windowed 1280x800` | Run in a window instead of full screen |
-| `client --monitor 1` | Fill a different monitor |
+| `client --host 192.168.1.20` | Connect straight away instead of showing the list (add `--code 123456` the first time) |
+| `client --windowed 1280x800` | Stream in a window instead of full screen |
+| `client --monitor 1` | Open the window on a different monitor |
 | `client --scale 2` | Force Retina-style 2x rendering (`auto` uses it on high-density screens) |
 | `client --no-vsync` | Show frames without waiting for the display refresh: up to one refresh (about 16 ms at 60 Hz) less latency, but can tear |
 | `host --max-fps 30 --bitrate-mbps 8` | Lower bandwidth |
@@ -111,7 +111,7 @@ Useful options:
 | `host --test-pattern` | Stream a generated picture instead of a virtual display (no permissions needed; any OS) |
 | `host --probe-display 2732x2048@2x` | Create a virtual display for 3 s to check the OS supports it |
 
-Client shortcuts (not sent to the host): **Ctrl+Alt+Shift+F** toggles full screen, **Ctrl+Alt+Shift+Q** quits.
+Client shortcuts while connected (not sent to the host): **Ctrl+Alt+Shift+D** disconnects (back to the list), **Ctrl+Alt+Shift+F** toggles full screen, **Ctrl+Alt+Shift+Q** quits.
 
 Quick test on one Mac: run the host, then `freemonplay-client --host 127.0.0.1 --windowed 1280x800`. A new display appears in System Settings > Displays. Drag a window onto it and it shows up in the client window.
 
@@ -133,7 +133,7 @@ crates/
 - **Transport:** one QUIC connection per screen (`quinn`). Client to host is a control stream (hello, input, keyframe requests). Host to client is a video stream of H.264 access units. Messages are length-prefixed `postcard`.
 - **Latency measurement:** each side times what it can on its own clock: the host from capture to sent, the client from received to shown, and QUIC tracks the round trip. The host adds them up (host + half the round trip + client) and shows the estimate in the menu. It leaves out capture's own delay and the wait for the client display's next refresh, so the real figure is somewhat higher.
 - **Latency:** the host keeps only the newest captured frame. If encoding or the network falls behind, frames are skipped *before* encoding, so the picture never queues up. The client does the same after decoding.
-- **Pairing:** the host has a self-signed certificate. A new client must send the host's pairing code; the host then issues a random token (it stores only its hash) and the client pins the host's certificate fingerprint. Five wrong codes rotate the code.
+- **Pairing:** the first time, the client and host run SPAKE2 (a password-authenticated key exchange) with the host's 6 digit code, and each proves it got the same key with an HMAC bound to this TLS connection. The code never crosses the network, someone in the middle gets one online guess per attempt (five failures rotate the code), and a relayed connection fails even with the right code. The host then issues a random token (storing only its hash) and the client pins the host's certificate fingerprint for later connections.
 - **Display identity:** each client gets a stable serial number, so macOS remembers where you arranged that screen.
 
 ## Known limitations and next steps
@@ -144,16 +144,24 @@ crates/
 - **HEVC on Windows clients** needs Microsoft's "HEVC Video Extensions" (often preinstalled by PC makers). Without them, Windows clients use H.264.
 - **HEVC on Linux clients** is offered automatically only with a VAAPI HEVC decoder (`vah265dec`/`vaapih265dec`); `--codec h265` forces it in software via `avdec_h265`.
 - **Bitrate control with the software encoder is loose.** Frame skipping is off to avoid stutter, and OpenH264 can't cap bitrate strictly without it. That's fine on a LAN.
-- **First-pairing trust.** Someone actively intercepting your LAN during the very first pairing could sit in the middle. After pairing, the pinned fingerprint prevents this.
-- **No GUI yet.** Both sides are command line tools. Next: a tray app for the host and a host picker for the client.
+- **Client app packaging.** The client is a single program with its own window, but not yet a Mac `.app`, Windows installer or Linux desktop entry.
 - **Windows and Linux hosts** aren't implemented yet (see `crates/host/src/platform/unsupported.rs` for the plan).
 - **Touch** maps to a single-finger mouse. Multi-touch gestures aren't forwarded.
 
-## Licensing notes
+## License
 
-The code is MIT or Apache-2.0. H.264 is patent-encumbered:
-- **Hardware path:** on macOS the encoding is done by Apple's built-in encoder, which ships licensed with the OS.
-- **Clients** decode with the OS's decoder (Apple's, Microsoft's, or the distro's GStreamer plugins). macOS and Windows client builds contain no OpenH264 at all.
+Copyright (C) 2026 moridin1138
+
+freemonplay is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [LICENSE](LICENSE) for details.
+
+In short: anyone can use, study, change and share it, but anything distributed that includes it must also be GPL, with source.
+
+All dependencies are under GPL-compatible licenses (MIT, Apache-2.0, BSD, ISC, Zlib and one MPL-2.0 crate). On Linux the client uses the system's GStreamer (LGPL) through dynamic linking.
+
+### H.264 and HEVC patents
+
+These codecs are patent-encumbered, separately from copyright:
+- **Hardware paths:** encoding on macOS and decoding on macOS and Windows use the operating system's built-in codecs, which ship licensed with the OS. On Linux the codecs come from the distribution's GStreamer plugins.
 - **OpenH264** is compiled from source (BSD licensed) only for the host's software fallback encoder and the Linux client's last-resort decoder. Cisco's royalty coverage applies only to its own prebuilt binaries, not to builds from source.
 
 That's generally a non-issue for personal use, but check before distributing binaries commercially.

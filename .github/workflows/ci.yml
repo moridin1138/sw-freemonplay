@@ -1,0 +1,87 @@
+# Tests and builds every platform on each push and pull request. release.yml reuses it to
+# produce the downloads for a tagged release.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS (menu bar app + client, universal)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Build the menu bar app
+        run: ./build/macos/bundle.sh --universal
+      - name: Build the client
+        run: |
+          cargo build --release --locked -p freemonplay-client --target aarch64-apple-darwin --target x86_64-apple-darwin
+          mkdir -p target/universal
+          lipo -create -output target/universal/freemonplay-client \
+            target/aarch64-apple-darwin/release/freemonplay-client target/x86_64-apple-darwin/release/freemonplay-client
+      - name: Package
+        run: |
+          mkdir -p dist client
+          ditto -c -k --keepParent target/freemonplay.app dist/freemonplay-macos.zip
+          cp target/universal/freemonplay-client LICENSE README.md client/
+          ditto -c -k client dist/freemonplay-client-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*
+
+  windows:
+    name: Windows (client)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Build
+        run: cargo build --release --locked -p freemonplay-client
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist, client | Out-Null
+          Copy-Item target/release/freemonplay-client.exe, LICENSE, README.md client/
+          Compress-Archive -Path client/* -DestinationPath dist/freemonplay-client-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+  linux:
+    name: Linux (client)
+    # Oldest supported Ubuntu, so the binary runs on 22.04+, Debian 12+ and similar.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GStreamer development files
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Build
+        run: cargo build --release --locked -p freemonplay-client
+      - name: Package
+        run: |
+          mkdir -p dist freemonplay-client
+          cp target/release/freemonplay-client LICENSE README.md freemonplay-client/
+          tar -czf dist/freemonplay-client-linux-x86_64.tar.gz freemonplay-client
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*

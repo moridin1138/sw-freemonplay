@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds target/freemonplay.app: the host as a menu bar app.
-#   ./build/macos/bundle.sh            build only
-#   ./build/macos/bundle.sh --install  build and copy to /Applications (recommended)
+#   ./build/macos/bundle.sh              build only
+#   ./build/macos/bundle.sh --install    build and copy to /Applications (recommended)
+#   ./build/macos/bundle.sh --universal  Apple Silicon + Intel in one binary (used for releases)
 #
 # Run it from /Applications: macOS guards apps that live inside Documents, Desktop or
 # Downloads, and can stall them behind "access files in your Documents folder" prompts.
@@ -17,11 +18,31 @@ export PATH="$HOME/.cargo/bin:/opt/homebrew/opt/rustup/bin:$PATH"
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 app=target/freemonplay.app
 
-cargo build --release -p freemonplay-host
+install=false
+universal=false
+for arg in "$@"; do
+    case "$arg" in
+        --install) install=true ;;
+        --universal) universal=true ;;
+        *) echo "unknown option $arg" >&2; exit 1 ;;
+    esac
+done
+
+if $universal; then
+    rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
+    cargo build --release --locked -p freemonplay-host --target aarch64-apple-darwin --target x86_64-apple-darwin
+    mkdir -p target/universal
+    lipo -create -output target/universal/freemonplay-host \
+        target/aarch64-apple-darwin/release/freemonplay-host target/x86_64-apple-darwin/release/freemonplay-host
+    binary=target/universal/freemonplay-host
+else
+    cargo build --release -p freemonplay-host
+    binary=target/release/freemonplay-host
+fi
 
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp target/release/freemonplay-host "$app/Contents/MacOS/freemonplay"
+cp "$binary" "$app/Contents/MacOS/freemonplay"
 cp build/macos/icon/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 
 cat > "$app/Contents/Info.plist" <<PLIST
@@ -30,7 +51,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>com.forwardedu.freemonplay</string>
+    <string>io.github.moridin1138.freemonplay</string>
     <key>CFBundleName</key>
     <string>freemonplay</string>
     <key>CFBundleDisplayName</key>
@@ -63,15 +84,15 @@ PLIST
 
 identity="freemonplay Local Signing"
 if security find-identity -p codesigning 2>/dev/null | grep -q "\"$identity\""; then
-    codesign --force --sign "$identity" --identifier com.forwardedu.freemonplay "$app"
+    codesign --force --sign "$identity" --identifier io.github.moridin1138.freemonplay "$app"
     echo "Signed with \"$identity\""
 else
-    codesign --force --sign - --identifier com.forwardedu.freemonplay "$app"
+    codesign --force --sign - --identifier io.github.moridin1138.freemonplay "$app"
     echo "Ad-hoc signed. Permissions reset on each rebuild; run build/macos/make-signing-identity.sh once to fix that."
 fi
 echo "Built $app"
 
-if [[ "${1:-}" == "--install" ]]; then
+if $install; then
     dest=/Applications/freemonplay.app
     if pgrep -xq freemonplay; then
         echo "Quitting the running freemonplay first"

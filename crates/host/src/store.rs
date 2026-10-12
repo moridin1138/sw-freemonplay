@@ -48,10 +48,7 @@ impl HostStore {
     pub fn open(dir: Option<PathBuf>) -> Result<Self> {
         let dir = match dir {
             Some(d) => d,
-            None => directories::ProjectDirs::from("com", "forwardedu", "freemonplay")
-                .context("no home directory")?
-                .config_dir()
-                .join("host"),
+            None => default_config_dir("host")?,
         };
         std::fs::create_dir_all(&dir)?;
 
@@ -110,20 +107,21 @@ impl HostStore {
 
     /// Checks a pairing code. On success returns a fresh token the client should keep.
     /// Too many wrong guesses rotate the code.
-    pub fn pair(&self, client_id: &str, client_name: &str, code: &str) -> Result<Vec<u8>, String> {
-        {
-            let mut p = self.pairing.lock().unwrap();
-            if code.trim() != p.code {
-                p.failures += 1;
-                if p.failures >= MAX_CODE_FAILURES {
-                    p.code = new_code();
-                    p.failures = 0;
-                    tracing::warn!("too many wrong pairing codes, new code is {}", p.code);
-                }
-                return Err("wrong pairing code".into());
-            }
+    /// Counts a pairing attempt that didn't prove knowledge of the code. Too many rotate the
+    /// code, so guessing it online is hopeless.
+    pub fn pairing_failed(&self) {
+        let mut p = self.pairing.lock().unwrap();
+        p.failures += 1;
+        if p.failures >= MAX_CODE_FAILURES {
+            p.code = new_code();
             p.failures = 0;
+            tracing::warn!("too many failed pairing attempts, new code is {}", p.code);
         }
+    }
+
+    /// Records a client that proved it knew the code, and returns the token it should keep.
+    pub fn complete_pairing(&self, client_id: &str, client_name: &str) -> Vec<u8> {
+        self.pairing.lock().unwrap().failures = 0;
         let token = rand::random::<[u8; 32]>().to_vec();
         let mut t = self.trusted.lock().unwrap();
         t.clients.insert(
@@ -133,7 +131,7 @@ impl HostStore {
         if let Err(e) = self.save(&t) {
             tracing::error!("could not save trusted clients: {e:#}");
         }
-        Ok(token)
+        token
     }
 
     pub fn check_token(&self, client_id: &str, token: &[u8]) -> bool {
@@ -150,6 +148,25 @@ impl HostStore {
     fn save(&self, t: &Trusted) -> Result<()> {
         write_private(&self.dir.join("trusted_clients.json"), &serde_json::to_vec_pretty(t)?)
     }
+}
+
+/// This app's config folder. Moves the folder over from the old `com.forwardedu` identifier
+/// the first time, so existing pairings and settings carry over.
+fn default_config_dir(sub: &str) -> Result<PathBuf> {
+    let dir = directories::ProjectDirs::from("io", "github.moridin1138", "freemonplay")
+        .context("no home directory")?
+        .config_dir()
+        .join(sub);
+    if !dir.exists()
+        && let Some(old) = directories::ProjectDirs::from("com", "forwardedu", "freemonplay")
+        && old.config_dir().join(sub).exists()
+    {
+        let old = old.config_dir().join(sub);
+        std::fs::create_dir_all(dir.parent().context("config dir has no parent")?)?;
+        std::fs::rename(&old, &dir).with_context(|| format!("moving {} to {}", old.display(), dir.display()))?;
+        tracing::info!("moved config from {} to {}", old.display(), dir.display());
+    }
+    Ok(dir)
 }
 
 fn new_code() -> String {

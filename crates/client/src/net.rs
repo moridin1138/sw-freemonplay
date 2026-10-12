@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use fmp_proto::{
     ALPN, Auth, ClientMsg, Codec, DEFAULT_PORT, DisplayRequest, Hello, HostMsg, PROTOCOL_VERSION, RejectKind,
-    SERVICE_TYPE, VideoFrame,
+    SERVICE_TYPE, VideoFrame, pairing,
     read_msg, write_msg,
 };
 use rustls::DigitallySignedStruct;
@@ -20,13 +20,16 @@ use tokio::sync::{mpsc, oneshot};
 use winit::event_loop::EventLoopProxy;
 
 use crate::decode::{self, FrameSlot};
-use crate::store::{ClientStore, hex};
+use crate::store::{self, ClientStore, hex};
 use crate::UserEvent;
 
+#[derive(Clone)]
 pub struct Target {
     pub name: String,
     /// Addresses to try, best first.
     pub addrs: Vec<SocketAddr>,
+    /// The host's advertised id (discovered hosts only).
+    pub id: Option<String>,
 }
 
 impl std::fmt::Display for Target {
@@ -36,34 +39,50 @@ impl std::fmt::Display for Target {
     }
 }
 
-/// Browses mDNS for `wait` and returns every host that answered.
-pub fn discover(wait: Duration) -> Result<Vec<Target>> {
+/// Hosts currently advertising on the LAN, kept up to date in the background.
+pub type HostList = Arc<Mutex<Vec<Target>>>;
+
+/// Browses mDNS continuously; `changed` is called whenever the list changes.
+pub fn browse(changed: impl Fn() + Send + 'static) -> Result<HostList> {
     let mdns = mdns_sd::ServiceDaemon::new()?;
     let rx = mdns.browse(SERVICE_TYPE)?;
-    let deadline = Instant::now() + wait;
-    // A host's addresses can arrive over several answers, so merge them per host id.
-    let mut found: BTreeMap<String, (String, u16, Vec<IpAddr>)> = BTreeMap::new();
-    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
-        let Ok(event) = rx.recv_timeout(left) else { break };
-        if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
-            let id = info.get_property_val_str("id").unwrap_or(&info.fullname).to_string();
-            let name = info.get_property_val_str("name").unwrap_or(&info.fullname).to_string();
-            let entry = found.entry(id).or_insert_with(|| (name, info.port, Vec::new()));
-            for ip in info.addresses.iter().map(|a| a.to_ip_addr()) {
-                if !entry.2.contains(&ip) {
-                    entry.2.push(ip);
+    let list: HostList = Arc::default();
+    let shared = list.clone();
+    std::thread::Builder::new().name("discovery".into()).spawn(move || {
+        let _mdns = mdns; // keep the daemon alive with the thread
+        // A host's addresses can arrive over several answers, so merge them per service.
+        let mut found: BTreeMap<String, (Option<String>, String, u16, Vec<IpAddr>)> = BTreeMap::new();
+        while let Ok(event) = rx.recv() {
+            match event {
+                mdns_sd::ServiceEvent::ServiceResolved(info) => {
+                    let id = info.get_property_val_str("id").map(str::to_string);
+                    let name = info.get_property_val_str("name").unwrap_or(&info.fullname).to_string();
+                    let entry = found.entry(info.fullname.clone()).or_insert_with(|| (id, name, info.port, Vec::new()));
+                    entry.2 = info.port;
+                    for ip in info.addresses.iter().map(|a| a.to_ip_addr()) {
+                        if !entry.3.contains(&ip) {
+                            entry.3.push(ip);
+                        }
+                    }
                 }
+                mdns_sd::ServiceEvent::ServiceRemoved(_, fullname) => {
+                    found.remove(&fullname);
+                }
+                _ => continue,
             }
+            let mut targets: Vec<Target> = found
+                .values()
+                .filter_map(|(id, name, port, ips)| {
+                    let addrs = rank_addresses(ips.clone(), *port);
+                    (!addrs.is_empty()).then(|| Target { name: name.clone(), addrs, id: id.clone() })
+                })
+                .collect();
+            targets.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            *shared.lock().unwrap() = targets;
+            changed();
         }
-    }
-    let _ = mdns.shutdown();
-    Ok(found
-        .into_values()
-        .filter_map(|(name, port, ips)| {
-            let addrs = rank_addresses(ips, port);
-            (!addrs.is_empty()).then_some(Target { name, addrs })
-        })
-        .collect())
+    })?;
+    Ok(list)
 }
 
 /// Drops addresses another machine can't use (loopback, IPv6 link-local without a scope
@@ -100,7 +119,7 @@ pub async fn resolve(spec: &str) -> Result<Target> {
     if addrs.is_empty() {
         bail!("no address for {spec}");
     }
-    Ok(Target { name: spec.to_string(), addrs })
+    Ok(Target { name: spec.to_string(), addrs, id: None })
 }
 
 /// Tries each of the target's addresses in turn and returns the first connection.
@@ -204,14 +223,56 @@ impl ServerCertVerifier for RecordingVerifier {
     }
 }
 
+/// How we prove ourselves to the host.
+pub enum Credentials {
+    /// Issued when we paired before.
+    Token(Vec<u8>),
+    /// First time: the code the host shows. Used for SPAKE2 pairing, never sent.
+    Code(String),
+}
+
+/// Result of connecting to a host before starting a session.
+pub enum Prepared {
+    /// Connected, with a saved pairing (or a code to pair with).
+    Ready(Connected, Credentials),
+    /// First time with this host: ask for its code, then call `prepare_with_code`.
+    NeedCode { fingerprint: String },
+}
+
+/// Connects and checks whether we're already paired. Doesn't hold the connection open
+/// while a person types a code: the host only waits a few seconds for a session to start.
+pub async fn prepare(target: &Target, store: &Mutex<ClientStore>, code: Option<String>) -> Result<Prepared> {
+    let connected = connect_any(target).await?;
+    let token = store.lock().unwrap().host(&connected.fingerprint).and_then(|h| store::unhex(&h.token_hex));
+    if let Some(token) = token {
+        return Ok(Prepared::Ready(connected, Credentials::Token(token)));
+    }
+    match code {
+        Some(code) => Ok(Prepared::Ready(connected, Credentials::Code(code))),
+        None => {
+            connected.conn.close(0u32.into(), b"pairing");
+            Ok(Prepared::NeedCode { fingerprint: connected.fingerprint })
+        }
+    }
+}
+
+/// Reconnects to pair with `code`, checking it's still the host we asked the code for.
+pub async fn prepare_with_code(target: &Target, code: String, fingerprint: &str) -> Result<Prepared> {
+    let connected = connect_any(target).await?;
+    if connected.fingerprint != fingerprint {
+        bail!("the host's identity changed while pairing; not continuing");
+    }
+    Ok(Prepared::Ready(connected, Credentials::Code(code)))
+}
+
 pub struct Session {
     pub connected: Connected,
-    pub auth: Auth,
+    pub credentials: Credentials,
     pub client_name: String,
     /// Codecs to offer, most preferred first.
     pub codecs: Vec<Codec>,
-    pub store: ClientStore,
-    pub display: oneshot::Receiver<DisplayRequest>,
+    pub store: Arc<Mutex<ClientStore>>,
+    pub display: DisplayRequest,
     pub outgoing: mpsc::UnboundedReceiver<ClientMsg>,
     pub outgoing_tx: mpsc::UnboundedSender<ClientMsg>,
     pub frames: Arc<FrameSlot>,
@@ -222,33 +283,57 @@ pub struct Session {
 pub async fn run(mut s: Session) -> Result<String> {
     let conn = s.connected.conn.clone();
     let (mut send, mut recv) = conn.open_bi().await?;
-    let display = s.display.await.context("window never opened")?;
+    let display = s.display;
 
+    let (auth, mut pairing) = match &s.credentials {
+        Credentials::Token(token) => (Auth::Token(token.clone()), None),
+        Credentials::Code(code) => {
+            let (state, msg) = pairing::Pairing::client(code);
+            (Auth::Pake(msg), Some(state))
+        }
+    };
     let hello = Hello {
         protocol: PROTOCOL_VERSION,
-        client_id: s.store.client_id().to_string(),
+        client_id: s.store.lock().unwrap().client_id().to_string(),
         client_name: s.client_name.clone(),
-        auth: s.auth.clone(),
+        auth,
         display,
         codecs: s.codecs.clone(),
     };
     write_msg(&mut send, &ClientMsg::Hello(hello)).await?;
 
-    let welcome = match read_msg::<HostMsg>(&mut recv).await? {
+    let mut reply = read_msg::<HostMsg>(&mut recv).await?;
+    if let Some(HostMsg::PairingChallenge { pake, proof }) = &reply {
+        let state = pairing.take().context("host started pairing, but we didn't ask to pair")?;
+        let key = state.finish(pake)?;
+        let binding = pairing::channel_binding(&conn)?;
+        if !key.verify(pairing::Role::Host, &binding, proof) {
+            conn.close(0u32.into(), b"pairing failed");
+            bail!(
+                "pairing failed: wrong code, or something is interfering with the connection. \
+                 Check the code shown on the host and try again"
+            );
+        }
+        write_msg(&mut send, &ClientMsg::PairingProof(key.confirmation(pairing::Role::Client, &binding))).await?;
+        reply = read_msg::<HostMsg>(&mut recv).await?;
+    }
+
+    let welcome = match reply {
         Some(HostMsg::Welcome(w)) => w,
         Some(HostMsg::Rejected { reason, kind }) => {
             // Only drop our pairing when the host says it no longer knows us; a codec or
             // version problem doesn't mean we should have to pair again.
             if kind == RejectKind::NotPaired {
-                let _ = s.store.forget(&s.connected.fingerprint);
+                let _ = s.store.lock().unwrap().forget(&s.connected.fingerprint);
             }
             bail!("host refused: {reason}");
         }
         Some(HostMsg::Notice { message }) => bail!("unexpected notice before welcome: {message}"),
+        Some(HostMsg::PairingChallenge { .. }) => bail!("host asked to pair twice"),
         None => bail!("host closed the connection during the handshake"),
     };
     if let Some(token) = &welcome.issued_token {
-        s.store.remember(&s.connected.fingerprint, &welcome.host_name, token)?;
+        s.store.lock().unwrap().remember(&s.connected.fingerprint, &welcome.host_name, &welcome.host_id, token)?;
         tracing::info!("paired with {}; no code needed next time", welcome.host_name);
     }
     let _ = s.proxy.send_event(UserEvent::Connected {

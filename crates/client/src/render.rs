@@ -10,6 +10,13 @@ use winit::window::Window;
 
 use crate::decode::{self, YuvFrame};
 
+/// An egui frame to draw over (or instead of) the video.
+pub struct UiFrame {
+    pub primitives: Vec<egui::ClippedPrimitive>,
+    pub textures: egui::TexturesDelta,
+    pub pixels_per_point: f32,
+}
+
 const SHADER: &str = r#"
 struct Params {
     scale: vec2<f32>,
@@ -99,6 +106,7 @@ pub struct Renderer {
     planes: Option<Planes>,
     /// Bound in the unused V slot for NV12 (the shader ignores it).
     placeholder: wgpu::Texture,
+    egui: egui_wgpu::Renderer,
     #[cfg(target_os = "macos")]
     metal: Option<crate::render_metal::MetalImport>,
 }
@@ -237,6 +245,7 @@ impl Renderer {
         });
         #[cfg(target_os = "macos")]
         let metal = crate::render_metal::MetalImport::new(&device);
+        let egui = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
 
         Ok(Self {
             surface,
@@ -250,6 +259,7 @@ impl Renderer {
             linearize,
             planes: None,
             placeholder,
+            egui,
             #[cfg(target_os = "macos")]
             metal,
         })
@@ -307,14 +317,38 @@ impl Renderer {
         }
     }
 
-    pub fn render(&mut self) {
+    /// Largest texture egui may create.
+    pub fn max_texture_side(&self) -> usize {
+        self.device.limits().max_texture_dimension_2d as usize
+    }
+
+    /// Forgets the last video frame (when going back to the host list).
+    pub fn clear_video(&mut self) {
+        self.planes = None;
+    }
+
+    /// Draws the latest video frame, if any, with the interface on top, and presents.
+    pub fn render(&mut self, ui: Option<UiFrame>) {
+        // egui's texture changes must be applied even if this frame can't be shown: the first
+        // set holds the whole font atlas, and later ones only patch it.
+        if let Some(ui) = &ui {
+            for (id, deltas) in &ui.textures.set {
+                for delta in deltas {
+                    self.egui.update_texture(&self.device, &self.queue, *id, delta);
+                }
+            }
+        }
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.device, &self.config);
+                self.free_ui_textures(ui.as_ref());
                 return;
             }
-            _ => return,
+            _ => {
+                self.free_ui_textures(ui.as_ref());
+                return;
+            }
         };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -326,6 +360,14 @@ impl Renderer {
         }
 
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
+        let screen = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [self.config.width, self.config.height],
+            pixels_per_point: ui.as_ref().map_or(1.0, |u| u.pixels_per_point),
+        };
+        let mut ui_commands = Vec::new();
+        if let Some(ui) = &ui {
+            ui_commands = self.egui.update_buffers(&self.device, &self.queue, &mut encoder, &ui.primitives, &screen);
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("frame"),
@@ -342,9 +384,21 @@ impl Renderer {
                 pass.set_bind_group(0, &p.bind_group, &[]);
                 pass.draw(0..6, 0..1);
             }
+            if let Some(ui) = &ui {
+                self.egui.render(&mut pass.forget_lifetime(), &ui.primitives, &screen);
+            }
         }
-        self.queue.submit([encoder.finish()]);
+        self.queue.submit(ui_commands.into_iter().chain([encoder.finish()]));
         self.queue.present(frame);
+        self.free_ui_textures(ui.as_ref());
+    }
+
+    fn free_ui_textures(&mut self, ui: Option<&UiFrame>) {
+        if let Some(ui) = ui {
+            for id in &ui.textures.free {
+                self.egui.free_texture(id);
+            }
+        }
     }
 
     fn make_planes(&self, width: u32, height: u32, nv12: bool) -> Planes {

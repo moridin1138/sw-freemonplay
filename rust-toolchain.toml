@@ -1,0 +1,4 @@
+# Same compiler everywhere: local builds, the Linux Docker build and CI.
+[toolchain]
+channel = "1.99.0"
+profile = "minimal"

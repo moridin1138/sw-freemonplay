@@ -4,9 +4,13 @@ description = "Wire protocol shared by the freemonplay host and client"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
 postcard.workspace = true
 serde.workspace = true
 quinn.workspace = true
+spake2 = "0.4"
+hmac = "0.12"
+sha2 = "0.10"
