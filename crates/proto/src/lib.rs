@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub mod hid;
 pub mod pairing;
 
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 pub const ALPN: &[u8] = b"freemonplay/1";
 pub const SERVICE_TYPE: &str = "_freemonplay._udp.local.";
 pub const DEFAULT_PORT: u16 = 47800;
@@ -60,6 +60,20 @@ pub struct Hello {
     pub display: DisplayRequest,
     /// Codecs the client can decode, most preferred first.
     pub codecs: Vec<Codec>,
+    /// Which of the client's monitors this session fills, when it uses several. `None` is
+    /// its main one (the monitor its window is on), which keeps the client's original
+    /// identity on the host.
+    pub screen: Option<ScreenId>,
+}
+
+/// One of a client's monitors, so the host gives each its own virtual display that the
+/// host OS remembers (arrangement, resolution).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenId {
+    /// Stable for that monitor on the client, e.g. its OS name.
+    pub key: String,
+    /// Shown to the user, e.g. "DISPLAY2".
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -280,6 +294,7 @@ mod tests {
             auth: Auth::Pake(vec![1; 33]),
             display: DisplayRequest { width: 1920, height: 1080, refresh_hz: 60, hidpi: false, size_mm: None },
             codecs: vec![Codec::H265, Codec::H264],
+            screen: Some(ScreenId { key: "\\\\.\\DISPLAY2".into(), name: "DISPLAY2".into() }),
         });
         let bytes = encode(&hello).unwrap();
         assert_eq!(peek_hello_protocol(&bytes[4..]), Some(PROTOCOL_VERSION));

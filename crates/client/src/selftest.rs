@@ -54,9 +54,11 @@ fn pass() -> Result<bool> {
     // Only the newest picture is kept, as in a real session: shared frames each hold one of
     // the decoder's few texture slots until they're dropped.
     let latest: Arc<Mutex<(usize, Option<YuvFrame>)>> = Arc::default();
+    let out_pts: Arc<Mutex<Vec<u64>>> = Arc::default();
     let deliver: Deliver = {
-        let latest = latest.clone();
-        Arc::new(move |f| {
+        let (latest, out_pts) = (latest.clone(), out_pts.clone());
+        Arc::new(move |f: YuvFrame| {
+            out_pts.lock().unwrap().push(f.pts_us);
             let mut latest = latest.lock().unwrap();
             latest.0 += 1;
             latest.1 = Some(f);
@@ -70,7 +72,7 @@ fn pass() -> Result<bool> {
     for (i, unit) in units.iter().enumerate() {
         let before = latest.lock().unwrap().0;
         let start = Instant::now();
-        decoder.decode(unit, i as u64 * 33_333)?;
+        decoder.decode(unit, pts_of(i))?;
         // Some decoders hand pictures over asynchronously; give each one a moment.
         while latest.lock().unwrap().0 == before && start.elapsed() < Duration::from_millis(500) {
             std::thread::sleep(Duration::from_micros(200));
@@ -93,6 +95,19 @@ fn pass() -> Result<bool> {
     println!("  display path: {path}");
     let pixels = renderer.read_back()?;
     let mut ok = decoded == units.len();
+    // Latency stats match pictures to arrivals by timestamp, so they must come through intact.
+    let out_pts = std::mem::take(&mut *out_pts.lock().unwrap());
+    let kept = out_pts.iter().filter(|&&p| (0..units.len()).any(|i| pts_of(i) == p)).count();
+    let pts_ok = kept == out_pts.len();
+    ok &= pts_ok;
+    println!(
+        "  timestamps kept: {kept} of {} {}",
+        out_pts.len(),
+        if pts_ok { "ok" } else { "WRONG (latency can't be measured)" }
+    );
+    if !pts_ok {
+        println!("    sent {:?}...\n    got  {:?}...", (0..4).map(pts_of).collect::<Vec<_>>(), &out_pts[..out_pts.len().min(4)]);
+    }
     for (i, (name, want)) in BARS.iter().enumerate() {
         let x = (i as u32 * 2 + 1) * WIDTH / 8;
         let at = ((HEIGHT / 2 * WIDTH + x) * 4) as usize;
@@ -113,6 +128,11 @@ fn pass() -> Result<bool> {
     drop(renderer);
     tracing::debug!("cleaned up");
     Ok(ok)
+}
+
+/// Like the host's: microseconds since some start, at 30 fps.
+fn pts_of(frame: usize) -> u64 {
+    5_000_000_000 + frame as u64 * 33_333
 }
 
 fn average(times: &[Duration]) -> Option<Duration> {

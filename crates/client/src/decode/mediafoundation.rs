@@ -258,7 +258,8 @@ impl MfDecoder {
                     _handles: ring.handles.clone(),
                     lease: Arc::new(SlotLease(ring.busy[slot].clone())),
                 }),
-                pts_us: 0,
+                // We set sample times to the host's timestamp (in 100 ns units) on input.
+                pts_us: (sample.GetSampleTime().unwrap_or(0) / 10).max(0) as u64,
                 received_at: None,
             }))
         }

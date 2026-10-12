@@ -154,7 +154,12 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     let ClientMsg::Hello(hello) = decode(&body).context("malformed hello")? else {
         bail!("expected a hello");
     };
-    let who = format!("{} ({})", hello.client_name, conn.remote_address());
+    // Each of a client's monitors is a session of its own, named after the monitor.
+    let screen_name = match &hello.screen {
+        Some(screen) => format!("{} ({})", hello.client_name, screen.name),
+        None => hello.client_name.clone(),
+    };
+    let who = format!("{screen_name} ({})", conn.remote_address());
 
     let issued_token = match &hello.auth {
         Auth::Token(token) if ctx.store.check_token(&hello.client_id, token) => None,
@@ -206,8 +211,11 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     let mut source = if ctx.test_pattern {
         Source::Pattern(Pattern::start(width, height, fps, slot.clone()))
     } else {
-        let display_name = format!("freemonplay: {}", hello.client_name);
-        let serial = serial_for(&hello.client_id);
+        let display_name = format!("freemonplay: {screen_name}");
+        let serial = match &hello.screen {
+            Some(screen) => serial_for(&format!("{}/{}", hello.client_id, screen.key)),
+            None => serial_for(&hello.client_id),
+        };
         match start_screen(display_name, serial, req, (width, height, fps), slot.clone()).await {
             Ok(source) => source,
             // Tell the client what went wrong rather than just dropping the connection.
@@ -232,7 +240,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     let session = ctx.registry.add(
         SessionInfo {
             id: 0,
-            client_name: hello.client_name.clone(),
+            client_name: screen_name.clone(),
             addr: conn.remote_address(),
             width,
             height,

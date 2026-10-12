@@ -2,6 +2,8 @@
 //! connecting view. They only describe what to show and report what the user asked for;
 //! app.rs acts on it.
 
+use std::collections::HashSet;
+
 use egui::{Align, Color32, Key, Layout, RichText};
 
 use crate::net::Target;
@@ -24,6 +26,14 @@ pub struct HostRow {
     pub paired: bool,
 }
 
+/// One of this computer's other monitors, offered as an extra screen.
+pub struct MonitorRow {
+    /// Stable name, used to remember the choice and as the screen's identity on the host.
+    pub key: String,
+    pub label: String,
+    pub monitor: winit::monitor::MonitorHandle,
+}
+
 /// Settings for the next connection.
 pub struct Options {
     pub fullscreen: bool,
@@ -32,6 +42,8 @@ pub struct Options {
     pub codec: CodecArg,
     /// Stop this screen dimming, locking or sleeping while connected.
     pub keep_awake: bool,
+    /// Other monitors to use as well (by `MonitorRow::key`).
+    pub extra_monitors: HashSet<String>,
 }
 
 pub enum Action {
@@ -58,6 +70,7 @@ pub fn style(ctx: &egui::Context) {
 pub struct View<'a> {
     pub screen: &'a mut Screen,
     pub hosts: &'a [HostRow],
+    pub monitors: &'a [MonitorRow],
     pub message: Option<&'a str>,
     pub address: &'a mut String,
     pub options: &'a mut Options,
@@ -88,7 +101,7 @@ pub fn draw(ui: &mut egui::Ui, view: View<'_>) -> Option<Action> {
                 ui.add_space(8.0);
             }
             action = match view.screen {
-                Screen::Hosts => hosts(ui, view.hosts, view.address, view.options),
+                Screen::Hosts => hosts(ui, view.hosts, view.monitors, view.address, view.options),
                 Screen::Code { target, code, error, .. } => code_dialog(ui, &target.name, code, error.as_deref()),
                 Screen::Connecting { to } => connecting(ui, to),
                 Screen::Streaming => None,
@@ -97,7 +110,13 @@ pub fn draw(ui: &mut egui::Ui, view: View<'_>) -> Option<Action> {
     action
 }
 
-fn hosts(ui: &mut egui::Ui, hosts: &[HostRow], address: &mut String, options: &mut Options) -> Option<Action> {
+fn hosts(
+    ui: &mut egui::Ui,
+    hosts: &[HostRow],
+    monitors: &[MonitorRow],
+    address: &mut String,
+    options: &mut Options,
+) -> Option<Action> {
     let mut action = None;
     ui.label(RichText::new("Computers on your network").strong());
     egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -135,6 +154,24 @@ fn hosts(ui: &mut egui::Ui, hosts: &[HostRow], address: &mut String, options: &m
             }
         });
     });
+
+    if !monitors.is_empty() {
+        ui.add_space(4.0);
+        ui.label(RichText::new("Also use these monitors").strong())
+            .on_hover_text("Each one becomes another screen on the host, next to this one.");
+        ui.horizontal_wrapped(|ui| {
+            for m in monitors {
+                let mut on = options.extra_monitors.contains(&m.key);
+                if ui.checkbox(&mut on, &m.label).changed() {
+                    if on {
+                        options.extra_monitors.insert(m.key.clone());
+                    } else {
+                        options.extra_monitors.remove(&m.key);
+                    }
+                }
+            }
+        });
+    }
 
     ui.add_space(4.0);
     egui::CollapsingHeader::new("Connect by address").show(ui, |ui| {

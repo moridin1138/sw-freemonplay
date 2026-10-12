@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use fmp_proto::{
     ALPN, Auth, ClientMsg, Codec, DEFAULT_PORT, DisplayRequest, Hello, HostMsg, PROTOCOL_VERSION, RejectKind,
-    SERVICE_TYPE, VideoFrame, pairing,
+    SERVICE_TYPE, ScreenId, VideoFrame, pairing,
     read_msg, write_msg,
 };
 use rustls::DigitallySignedStruct;
@@ -266,6 +266,10 @@ pub async fn prepare_with_code(target: &Target, code: String, fingerprint: &str)
 }
 
 pub struct Session {
+    /// Which of the app's displays (windows) this session feeds; tags its events.
+    pub view: usize,
+    /// Which monitor, when the client uses several (`None`: the main one).
+    pub screen: Option<ScreenId>,
     pub connected: Connected,
     pub credentials: Credentials,
     pub client_name: String,
@@ -301,6 +305,7 @@ pub async fn run(mut s: Session) -> Result<String> {
         auth,
         display,
         codecs: s.codecs.clone(),
+        screen: s.screen.clone(),
     };
     write_msg(&mut send, &ClientMsg::Hello(hello)).await?;
 
@@ -339,6 +344,7 @@ pub async fn run(mut s: Session) -> Result<String> {
         tracing::info!("paired with {}; no code needed next time", welcome.host_name);
     }
     let _ = s.proxy.send_event(UserEvent::Connected {
+        view: s.view,
         host_name: welcome.host_name.clone(),
         width: welcome.width,
         height: welcome.height,
@@ -351,10 +357,10 @@ pub async fn run(mut s: Session) -> Result<String> {
     let (ready_tx, ready_rx) = oneshot::channel();
     {
         let (frames, proxy, tx) = (s.frames.clone(), s.proxy.clone(), s.outgoing_tx.clone());
-        let (codec, gpu_adapter) = (welcome.codec, s.gpu_adapter);
+        let (codec, gpu_adapter, view) = (welcome.codec, s.gpu_adapter, s.view);
         std::thread::Builder::new()
             .name("decoder".into())
-            .spawn(move || decode::run(codec, frame_rx, frames, proxy, &tx, ready_tx, gpu_adapter))?;
+            .spawn(move || decode::run(view, codec, frame_rx, frames, proxy, &tx, ready_tx, gpu_adapter))?;
     }
     // Let video wait in the network buffer until the decoder can take it, rather than
     // discarding frames (and asking for keyframes) while it starts up. If it failed to

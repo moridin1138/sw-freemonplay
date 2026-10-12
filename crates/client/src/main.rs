@@ -1,7 +1,8 @@
 //! freemonplay client: turns this screen into an extra monitor for a freemonplay host.
 //!
 //! Opens a window listing the hosts on the network; connecting fills the monitor the
-//! window is on. Shortcuts while connected (not forwarded to the host):
+//! window is on, plus any other monitors picked under "Also use these monitors" (each
+//! becomes a separate screen on the host). Shortcuts while connected (not forwarded to the host):
 //!   Ctrl+Alt+Shift+D  disconnect (back to the list)
 //!   Ctrl+Alt+Shift+F  toggle full screen
 //!   Ctrl+Alt+Shift+Q  quit
@@ -43,6 +44,9 @@ struct Args {
     /// Which monitor to open on (0 = first). Connecting fills the monitor the window is on.
     #[arg(long)]
     monitor: Option<usize>,
+    /// Use all of this computer's monitors, each as a separate screen on the host.
+    #[arg(long)]
+    all_monitors: bool,
     /// Stream in a window of this size (e.g. 1280x800) instead of full screen.
     #[arg(long, value_name = "WxH")]
     windowed: Option<String>,
@@ -119,13 +123,14 @@ fn main() -> Result<()> {
         store,
         hosts,
         args.name.clone().unwrap_or_else(hostname),
-        app::Startup { monitor: args.monitor, windowed, host: args.host, code: args.code },
+        app::Startup { monitor: args.monitor, all_monitors: args.all_monitors, windowed, host: args.host, code: args.code },
         ui::Options {
             fullscreen: windowed.is_none(),
             scale: args.scale,
             vsync: !args.no_vsync,
             codec: args.codec,
             keep_awake: !args.allow_sleep,
+            extra_monitors: Default::default(),
         },
     );
     event_loop.run_app(&mut app)?;

@@ -131,7 +131,9 @@ impl FrameSlot {
 
 /// `ready` fires once the decoder exists (or failed to start), so the caller can hold off
 /// reading video until then. Starting can take seconds, e.g. GStreamer's first-run plugin scan.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
+    view: usize,
     codec: Codec,
     frames: mpsc::Receiver<(VideoFrame, Instant)>,
     slot: Arc<FrameSlot>,
@@ -155,14 +157,14 @@ pub fn run(
             }
             drop(arrivals);
             if slot.put(picture) {
-                let _ = proxy.send_event(UserEvent::Frame);
+                let _ = proxy.send_event(UserEvent::Frame(view));
             }
         })
     };
     let mut decoder = match new_decoder(codec, deliver, gpu_adapter) {
         Ok(d) => d,
         Err(e) => {
-            let _ = proxy.send_event(UserEvent::Closed(format!("can't start {codec} decoder: {e:#}")));
+            let _ = proxy.send_event(UserEvent::Closed(view, format!("can't start {codec} decoder: {e:#}")));
             return;
         }
     };

@@ -4,7 +4,7 @@ Roughly in priority order. Done items move to the release notes.
 
 ## In progress
 
-- **Windows zero-copy display.** Media Foundation decodes on the GPU; frames are copied GPU-to-GPU into shared NV12 textures and drawn by wgpu's Direct3D 12 backend, synchronised with a shared fence. Falls back to copying on any failure (`FMP_ZERO_COPY=0` forces that). Passes `--self-test` on a Surface (Iris Xe): decode 1.8 ms per frame versus 4.9 ms copying. Still to check: lag in a real session at full resolution.
+- **Windows zero-copy display.** Media Foundation decodes on the GPU; frames are copied GPU-to-GPU into shared NV12 textures and drawn by wgpu's Direct3D 12 backend, synchronised with a shared fence. Falls back to copying on any failure (`FMP_ZERO_COPY=0` forces that). Passes `--self-test` on a Surface (Iris Xe): decode 1.8 ms per frame versus 4.9 ms copying. Real session at full resolution: noticeably smoother than copying. Done; moves to the release notes.
 
 - **Keep client screens awake.** Done on macOS (tested). Windows (`SetThreadExecutionState`) and Linux (D-Bus ScreenSaver inhibit, with GNOME session manager fallback) need testing on real machines.
 
