@@ -60,13 +60,41 @@ pub fn prioritize_current_thread() {
 ///
 /// Only warns: the preflight check can report "denied" in setups where capture works
 /// anyway, so the real signal is whether frames arrive (each session warns if they don't).
+/// Whether this app may capture the screen (macOS applies a new grant on the next launch).
+pub fn screen_recording_allowed() -> bool {
+    // SAFETY: a plain query.
+    unsafe { cg::CGPreflightScreenCaptureAccess() }
+}
+
+/// Whether this app may post mouse and keyboard events (Accessibility).
+pub fn input_allowed() -> bool {
+    // SAFETY: a plain query.
+    unsafe { cg::CGPreflightPostEventAccess() }
+}
+
+/// Asks macOS to list this app under Screen Recording (and prompt, the first time).
+pub fn request_screen_recording() {
+    // SAFETY: a plain request.
+    unsafe { cg::CGRequestScreenCaptureAccess() };
+}
+
+/// Asks macOS to list this app under Accessibility (and prompt, the first time).
+pub fn request_input() {
+    // SAFETY: a plain request.
+    unsafe { cg::CGRequestPostEventAccess() };
+}
+
 pub fn check_permissions() -> Result<()> {
     // Permissions belong to the app when bundled, otherwise to whatever terminal launched us.
-    let who = if crate::launched_from_app_bundle() { "freemonplay" } else { "your terminal app" };
+    let bundled = crate::launched_from_app_bundle();
+    let who = if bundled { "freemonplay" } else { "your terminal app" };
+    // The app's setup window explains and asks; from a terminal, ask straight away.
     // SAFETY: plain CoreGraphics queries with no arguments.
     unsafe {
         if !cg::CGPreflightScreenCaptureAccess() {
-            cg::CGRequestScreenCaptureAccess();
+            if !bundled {
+                cg::CGRequestScreenCaptureAccess();
+            }
             tracing::warn!(
                 "macOS reports no Screen Recording permission. If screens stay black, enable it for {who} \
                  in System Settings > Privacy & Security > Screen & System Audio Recording, then restart {who}. \
@@ -75,7 +103,9 @@ pub fn check_permissions() -> Result<()> {
             );
         }
         if !cg::CGPreflightPostEventAccess() {
-            cg::CGRequestPostEventAccess();
+            if !bundled {
+                cg::CGRequestPostEventAccess();
+            }
             tracing::warn!(
                 "Accessibility permission is missing, so input from screens will be ignored. Enable it for \
                  {who} in System Settings > Privacy & Security > Accessibility."

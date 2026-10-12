@@ -11,6 +11,8 @@ mod frame;
 mod kvm;
 #[cfg(target_os = "macos")]
 mod menubar;
+#[cfg(target_os = "macos")]
+mod welcome;
 mod pattern;
 mod platform;
 mod rate;

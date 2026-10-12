@@ -8,7 +8,20 @@ publishes it as the release notes.
 
 Hosts and clients must both be updated: the protocol changed (version 10).
 
+### Changed
+- **A clearer client window:** the real app icon, an amber Connect button for each
+  computer (with whether it's paired), the computer itself no longer listed, "Use this
+  screen as: Extra screen / Keyboard and mouse only" in plain words, a larger pairing code
+  field, shortcuts written with each OS's key names, and the version at the bottom. Windows
+  and Linux windows show the app icon too.
+
 ### Added
+- **A setup window on the Mac host:** on first launch (and whenever Screen Recording is
+  missing) a window walks through Screen Recording, Accessibility and connecting a first
+  screen, with live status for each permission, buttons that open the right System
+  Settings page, a Restart button once Screen Recording is newly allowed, the pairing code
+  with Copy Code, and a link to download freemonplay Screen. "Setup Guide…" in the menu
+  reopens it.
 - **Windows host, preview:** a Windows PC can now get extra screens too. Each screen
   extends the desktop onto a virtual monitor at its own resolution, through the signed,
   MIT licensed Virtual Display Driver (install it once, as administrator, with
@@ -18,8 +31,7 @@ Hosts and clients must both be updated: the protocol changed (version 10).
   Sync) on the same device, so frames never pass through system memory; OpenH264 is the
   fallback. Input by `SendInput`, and the shared clipboard. Tested on a Surface (Iris Xe)
   extending onto a MacBook Air at 2940x1912 HEVC. Run `freemonplay-host` from a terminal;
-  there's no tray app yet. Run `freemonplay-host` from a terminal; there's no tray app
-  yet.
+  there's no tray app yet.
 - **Mac downloads are disk images:** open one and drag the app to Applications.
 - **Copied images are shared too** (screenshots, images copied from apps), both ways,
   as PNG up to 24 MB. They travel on streams of their own, so a big one doesn't hold up

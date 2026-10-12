@@ -68,7 +68,7 @@ On the Mac that wants more screens, install the menu bar app:
 ./build/macos/bundle.sh --install
 ```
 
-Then open **freemonplay** from Launchpad or Spotlight. It lives in the menu bar (no Dock icon) and shows the pairing code, connected screens with live stats (frame rate, bitrate and estimated latency, with a breakdown per screen) and a Disconnect option for each, plus the codec, frame rate and input settings, Open at Login and the log. Install it to /Applications as above: macOS can stall apps that run from inside Documents, Desktop or Downloads behind file-access prompts.
+Then open **freemonplay** from Launchpad or Spotlight. The first time, a setup window walks you through the permissions and connecting a screen (**Setup Guide…** in the menu reopens it). It lives in the menu bar (no Dock icon) and shows the pairing code, connected screens with live stats (frame rate, bitrate and estimated latency, with a breakdown per screen) and a Disconnect option for each, plus the codec, frame rate and input settings, Open at Login and the log. Install it to /Applications as above: macOS can stall apps that run from inside Documents, Desktop or Downloads behind file-access prompts.
 
 On MacBooks with a notch, menu bar icons that don't fit are hidden behind it. If you can't see the freemonplay icon, open freemonplay again (from Spotlight or Launchpad) and its menu appears at the pointer, or Cmd-drag other icons to make room.
 

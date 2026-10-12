@@ -23,6 +23,7 @@ use fmp_proto::Edge;
 use crate::encoder::CodecChoice;
 use crate::registry::KvmRole;
 use crate::session::Ctx;
+use crate::welcome::{self, Welcome};
 
 const FPS_CHOICES: [u32; 4] = [30, 60, 90, 120];
 
@@ -72,6 +73,10 @@ pub fn run(ctx: Arc<Ctx>, log: PathBuf) {
     *controller.ivars().item.borrow_mut() = Some(item);
     *controller.ivars().menu.borrow_mut() = Some(menu);
     controller.update_status();
+    // First launch, or nothing can work yet: show the setup window.
+    if !controller.ivars().ctx.settings().welcomed || !controller.ivars().screen_at_launch {
+        controller.show_welcome();
+    }
 
     // Keep the screen count next to the icon current.
     let target: &AnyObject = &controller;
@@ -89,6 +94,9 @@ struct Ivars {
     item: RefCell<Option<Retained<NSStatusItem>>>,
     menu: RefCell<Option<Retained<NSMenu>>>,
     checked_notch: std::cell::Cell<bool>,
+    welcome: RefCell<Option<Welcome>>,
+    /// Screen Recording as macOS saw it at launch (a new grant needs a restart).
+    screen_at_launch: bool,
 }
 
 define_class!(
@@ -125,9 +133,65 @@ define_class!(
         #[unsafe(method(tick:))]
         fn tick(&self, _timer: &NSTimer) {
             self.update_status();
+            if let Some(w) = self.ivars().welcome.borrow().as_ref()
+                && w.window.isVisible()
+            {
+                w.refresh(&self.ivars().ctx.store.pairing_code());
+            }
             // The icon only gets its final position after launch, so check on the first tick.
             if !self.ivars().checked_notch.replace(true) {
                 self.warn_if_hidden_by_notch();
+            }
+        }
+
+        #[unsafe(method(showWelcome:))]
+        fn show_welcome_action(&self, _sender: &AnyObject) {
+            self.show_welcome();
+        }
+
+        #[unsafe(method(allowScreenRecording:))]
+        fn allow_screen_recording(&self, _sender: &AnyObject) {
+            crate::platform::request_screen_recording();
+            open_url("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+        }
+
+        #[unsafe(method(allowAccessibility:))]
+        fn allow_accessibility(&self, _sender: &AnyObject) {
+            crate::platform::request_input();
+            open_url("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility");
+        }
+
+        /// Relaunches the app so a new Screen Recording grant takes effect.
+        #[unsafe(method(restartApp:))]
+        fn restart_app(&self, _sender: &AnyObject) {
+            let bundle = objc2_foundation::NSBundle::mainBundle().bundlePath().to_string();
+            tracing::info!("restarting to pick up new permissions");
+            // A detached shell waits for us to exit, then opens the app again.
+            let spawned = std::process::Command::new("/bin/sh").args(["-c", "sleep 1; open \"$0\"", &bundle]).spawn();
+            if let Err(e) = spawned {
+                tracing::error!("couldn't restart: {e}");
+                return;
+            }
+            self.ivars().ctx.shutdown();
+            std::thread::sleep(Duration::from_millis(300));
+            NSApplication::sharedApplication(self.mtm()).terminate(None);
+        }
+
+        #[unsafe(method(copyCodeButton:))]
+        fn copy_code_button(&self, _sender: &AnyObject) {
+            copy_to_clipboard(&self.ivars().ctx.store.pairing_code());
+        }
+
+        #[unsafe(method(openDownload:))]
+        fn open_download(&self, _sender: &AnyObject) {
+            open_url(welcome::DOWNLOAD_URL);
+        }
+
+        #[unsafe(method(closeWelcome:))]
+        fn close_welcome(&self, _sender: &AnyObject) {
+            self.ivars().ctx.update_settings(|s| s.welcomed = true);
+            if let Some(w) = self.ivars().welcome.borrow().as_ref() {
+                w.window.orderOut(None);
             }
         }
 
@@ -242,9 +306,25 @@ impl Controller {
             item: RefCell::new(None),
             menu: RefCell::new(None),
             checked_notch: std::cell::Cell::new(false),
+            welcome: RefCell::new(None),
+            screen_at_launch: crate::platform::screen_recording_allowed(),
         });
         // SAFETY: NSObject's init on a freshly allocated instance.
         unsafe { msg_send![super(this), init] }
+    }
+
+    /// Shows the setup window, creating it the first time.
+    fn show_welcome(&self) {
+        let mtm = self.mtm();
+        let code = self.ivars().ctx.store.pairing_code();
+        let mut slot = self.ivars().welcome.borrow_mut();
+        if slot.is_none() {
+            let target: &AnyObject = self;
+            *slot = Some(Welcome::new(mtm, target, &code, self.ivars().screen_at_launch));
+        }
+        let w = slot.as_ref().unwrap();
+        w.refresh(&code);
+        w.show(mtm);
     }
 
     /// On notched MacBooks, status icons that don't fit beside the notch are silently hidden.
@@ -422,6 +502,7 @@ impl Controller {
             login.setState(if enabled { NSControlStateValueOn } else { NSControlStateValueOff });
             menu.addItem(&login);
         }
+        menu.addItem(&self.item("Setup Guide…", Some(sel!(showWelcome:)), 0));
         menu.addItem(&self.item("Show Log", Some(sel!(showLog:)), 0));
         menu.addItem(&NSMenuItem::separatorItem(self.mtm()));
         let quit = self.item("Quit freemonplay", Some(sel!(quit:)), 0);
@@ -459,6 +540,12 @@ fn menubar_icon() -> Option<Retained<NSImage>> {
     image.setSize(NSSize::new(18.0, 18.0));
     image.setAccessibilityDescription(Some(&NSString::from_str("freemonplay")));
     Some(image)
+}
+
+fn open_url(url: &str) {
+    if let Some(url) = NSURL::URLWithString(&NSString::from_str(url)) {
+        NSWorkspace::sharedWorkspace().openURL(&url);
+    }
 }
 
 fn copy_to_clipboard(text: &str) {

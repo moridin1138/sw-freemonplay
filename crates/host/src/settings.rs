@@ -23,11 +23,14 @@ pub struct Settings {
     pub kvm_sides: BTreeMap<String, Edge>,
     /// Share clipboard text with screens that ask to.
     pub share_clipboard: bool,
+    /// The setup window has been completed once (it still shows while Screen Recording is
+    /// missing).
+    pub welcomed: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { codec: CodecChoice::Auto, max_fps: 60, allow_input: true, kvm_sides: BTreeMap::new(), share_clipboard: true }
+        Self { codec: CodecChoice::Auto, max_fps: 60, allow_input: true, kvm_sides: BTreeMap::new(), share_clipboard: true, welcomed: false }
     }
 }
 

@@ -35,7 +35,7 @@ use crate::kvm;
 use crate::ui::{self, Action, HostRow, MonitorRow, Options, Role, Screen};
 use crate::{CodecArg, Scale};
 
-const PICKER_SIZE: LogicalSize<f64> = LogicalSize::new(580.0, 600.0);
+const PICKER_SIZE: LogicalSize<f64> = LogicalSize::new(560.0, 470.0);
 const DEFAULT_WINDOWED: (u32, u32) = (1280, 800);
 /// The display that holds the host list; it always exists.
 const MAIN: usize = 0;
@@ -164,6 +164,8 @@ pub struct App {
     /// description for the host.
     link: Option<LinkTuning>,
     network: Option<NetworkInfo>,
+    /// The app icon, for the window's header.
+    logo: Option<egui::TextureHandle>,
     /// The main session is keyboard and mouse only (no video).
     input_only: bool,
     /// Set while the host's keyboard and mouse control this computer: its input then lands
@@ -208,6 +210,7 @@ impl App {
             link: None,
             network: None,
             input_only: false,
+            logo: None,
             host_in_control: Arc::default(),
             exit_error: None,
         }
@@ -243,8 +246,14 @@ impl App {
                 None => tracing::warn!("no monitor {i}; using the primary one"),
             }
         }
+        // macOS shows the app bundle's icon; elsewhere the window carries its own.
+        #[cfg(not(target_os = "macos"))]
+        if let Some((w, h, rgba)) = ui::icon_rgba() {
+            attrs = attrs.with_window_icon(winit::window::Icon::from_rgba(rgba, w, h).ok());
+        }
         let window = Arc::new(event_loop.create_window(attrs)?);
         let renderer = Renderer::new(window.clone(), self.options.vsync)?;
+        self.logo = ui::load_logo(&self.egui_ctx);
         self.egui_state = Some(egui_winit::State::new(
             self.egui_ctx.clone(),
             egui::ViewportId::ROOT,
@@ -688,7 +697,11 @@ impl App {
                 .lock()
                 .unwrap()
                 .iter()
-                .map(|t| HostRow {
+                .enumerate()
+                // This computer, when it's also running a host: nothing to connect to.
+                .filter(|(_, t)| !t.name.eq_ignore_ascii_case(&self.client_name))
+                .map(|(index, t)| HostRow {
+                    index,
                     name: t.name.clone(),
                     address: t.addrs.first().map(|a| a.ip().to_string()).unwrap_or_default(),
                     paired: t.id.as_deref().is_some_and(|id| store.is_paired(id)),
@@ -708,6 +721,7 @@ impl App {
                     message: self.message.as_deref(),
                     address: &mut self.address,
                     options: &mut self.options,
+                    logo: self.logo.as_ref(),
                 },
             );
         });
@@ -733,7 +747,7 @@ impl App {
             let output = ctx.run_ui(raw, |ui| {
                 egui::Area::new(egui::Id::new("hint")).anchor(egui::Align2::CENTER_TOP, [0.0, 24.0]).show(ui.ctx(), |ui| {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.label("Ctrl+Alt+Shift+D to disconnect, Ctrl+Alt+Shift+F for full screen");
+                        ui.label(format!("{} disconnects · {} full screen on or off", ui::shortcut('D'), ui::shortcut('F')));
                     });
                 });
             });
