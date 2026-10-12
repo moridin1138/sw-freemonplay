@@ -6,7 +6,7 @@ publishes it as the release notes.
 
 ## [Unreleased]
 
-Hosts and clients must both be updated: the protocol changed (version 10).
+Hosts and screens must both be updated: the protocol changed (version 11).
 
 ### Changed
 - **New names: Freemonplay Host and Freemonplay Screen.** The Mac apps are now
@@ -38,9 +38,15 @@ Hosts and clients must both be updated: the protocol changed (version 10).
   the firewall rule, installs either with one click (Windows asks for administrator rights)
   and shows the pairing code. The new `freemonplay-host-windows-x64-setup.exe` installs
   the host with the Virtual Display Driver and the firewall rule in one go.
-- **Windows host: automatic display scaling.** HiDPI screens (a Retina Mac, or a PC at
-  150% or more) get 200% scaling, others 100%, so text appears the size it would on that
-  screen. Before, Windows picked 100% for a new 2940x1912 monitor, and everything was tiny.
+- **Windows host: automatic display scaling.** Each screen's virtual monitor gets that
+  screen's own scale (a Retina Mac 200%, a PC set to 150% gets 150%), so text appears the
+  size it would there. Before, Windows picked 100% for a new 2940x1912 monitor, and
+  everything was tiny. Screens now tell the host their scale (protocol 11).
+- **Riding out dropped connections:** when a screen's connection drops out (Wi-Fi gone for
+  more than a few seconds, a laptop roaming), the screen keeps the last picture and
+  reconnects by itself for 15 s, with a Stop button. The host keeps that screen's display
+  meanwhile, so the windows on it stay where they were instead of jumping to the main
+  display. Disconnecting on purpose still removes it straight away.
 - **A setup window on the Mac host:** on first launch (and whenever Screen Recording is
   missing) a window walks through Screen Recording, Accessibility and connecting a first
   screen, with live status for each permission, buttons that open the right System

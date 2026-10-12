@@ -35,12 +35,15 @@ use crate::kvm;
 use crate::ui::{self, Action, HostRow, MonitorRow, Options, Role, Screen};
 use crate::{CodecArg, Scale};
 
-const PICKER_SIZE: LogicalSize<f64> = LogicalSize::new(560.0, 470.0);
+const PICKER_SIZE: LogicalSize<f64> = LogicalSize::new(560.0, 500.0);
 const DEFAULT_WINDOWED: (u32, u32) = (1280, 800);
 /// The pointer this close to the top edge (points) shows the toolbar.
 const TOOLBAR_EDGE: f64 = 3.0;
 /// How long the toolbar stays after the pointer leaves it.
 const TOOLBAR_LINGER: Duration = Duration::from_millis(700);
+/// How long to keep trying after a connection drops out. The host keeps the screen's
+/// display about as long (its `parking::GRACE`).
+const RECONNECT_FOR: Duration = Duration::from_secs(15);
 /// The display that holds the host list; it always exists.
 const MAIN: usize = 0;
 
@@ -53,7 +56,10 @@ pub enum UserEvent {
     Prepared { view: usize, result: Result<(Prepared, Target), String>, code: Option<String> },
     Connected { view: usize, host_name: String, width: u32, height: u32, codec: Codec },
     Frame(usize),
-    Closed(usize, String),
+    /// A session ended. `lost`: the connection dropped out (rather than being closed).
+    Closed { view: usize, reason: String, lost: bool },
+    /// Reconnecting after a dropped connection didn't work in time.
+    ReconnectFailed,
 }
 
 /// From the command line; used once at startup.
@@ -163,6 +169,8 @@ pub struct App {
     /// Show the shortcut hint over the video until then.
     hint_until: Option<Instant>,
     toolbar: ToolbarState,
+    /// Trying to get back to the host after the connection dropped out, until then.
+    reconnecting: Option<Instant>,
     /// The main screen's host and stream, for the toolbar.
     host_name: String,
     /// Size and codec.
@@ -217,6 +225,7 @@ impl App {
             modifiers: ModifiersState::empty(),
             hint_until: None,
             toolbar: ToolbarState::default(),
+            reconnecting: None,
             host_name: String::new(),
             stream_detail: String::new(),
             shown_fps: None,
@@ -377,7 +386,7 @@ impl App {
             }
             return;
         }
-        if !matches!(self.screen, Screen::Connecting { .. }) {
+        if !matches!(self.screen, Screen::Connecting { .. }) && self.reconnecting.is_none() {
             return; // cancelled meanwhile
         }
         match result {
@@ -433,9 +442,14 @@ impl App {
             proxy: self.proxy.clone(),
         };
         let proxy = self.proxy.clone();
+        let watched = conn.clone();
         let task = self.rt.spawn(async move {
             let reason = net::run(session).await.unwrap_or_else(|e| format!("{e:#}"));
-            let _ = proxy.send_event(UserEvent::Closed(view, reason));
+            let lost = matches!(
+                watched.close_reason(),
+                Some(quinn::ConnectionError::TimedOut | quinn::ConnectionError::Reset)
+            );
+            let _ = proxy.send_event(UserEvent::Closed { view, reason, lost });
         });
         if let Some(display) = self.displays.get_mut(&view) {
             display.task = Some(task);
@@ -480,8 +494,13 @@ impl App {
             Scale::One => false,
             Scale::Two => true,
         };
-        tracing::info!("requesting a {width}x{height}@{refresh_hz} display (hidpi {hidpi})");
-        DisplayRequest { width, height, refresh_hz, hidpi, size_mm: None }
+        let scale = match self.options.scale {
+            Scale::Auto if self.options.fullscreen => density as f32,
+            Scale::Auto | Scale::One => 1.0,
+            Scale::Two => 2.0,
+        };
+        tracing::info!("requesting a {width}x{height}@{refresh_hz} display (hidpi {hidpi}, scale {scale})");
+        DisplayRequest { width, height, refresh_hz, hidpi, size_mm: None, scale }
     }
 
     fn on_connected(&mut self, event_loop: &ActiveEventLoop, view: usize, host_name: String, width: u32, height: u32, codec: Codec) {
@@ -533,6 +552,12 @@ impl App {
             return;
         }
         self.screen = Screen::Streaming;
+        if self.reconnecting.take().is_some() {
+            tracing::info!("reconnected to {host_name}");
+            self.host_name = host_name;
+            self.open_extras(event_loop);
+            return self.redraw();
+        }
         self.host_name = host_name;
         self.stream_detail = format!("{width}×{height} {codec}");
         self.shown_fps = None;
@@ -613,7 +638,7 @@ impl App {
         }
     }
 
-    fn on_closed(&mut self, view: usize, reason: String) {
+    fn on_closed(&mut self, view: usize, reason: String, lost: bool) {
         if view != MAIN {
             // Already gone if we closed it; otherwise the host ended just this screen.
             let disconnecting = self.displays.get(&view).and_then(|d| d.live.as_ref()).is_none_or(|l| l.disconnecting);
@@ -628,32 +653,12 @@ impl App {
         let Some(live) = main.live.take() else { return };
         main.task = None;
         main.release_all_keys();
-        main.video = None;
-        main.renderer.clear_video();
-        let w = &main.window;
-        w.set_fullscreen(None);
-        w.set_cursor_visible(true);
-        w.set_title("Freemonplay Screen");
-        let _ = w.request_inner_size(PICKER_SIZE);
-        // The other monitors end with the main one.
-        let extras: Vec<usize> = self.displays.keys().copied().filter(|&v| v != MAIN).collect();
-        for view in extras {
-            if let Some(mut display) = self.displays.remove(&view) {
-                display.close();
-                if let Some(task) = display.task.take()
-                    && display.live.is_none()
-                {
-                    task.abort();
-                }
-            }
+        // Keyboard and mouse sessions have no picture to hold on to; they go back to the list.
+        if lost && live.connected && !live.disconnecting && !self.input_only {
+            tracing::warn!("lost the connection to {} ({reason}); reconnecting", self.host_name);
+            return self.start_reconnecting();
         }
-        self.awake = None;
-        self.link = None;
-        self.network = None;
-        self.input_only = false;
-        self.hint_until = None;
-        self.toolbar = ToolbarState::default();
-        self.target = None;
+        self.leave_stream();
         // A failed first pairing goes back to the code dialog; anything else to the list.
         match live.pairing {
             Some((target, fingerprint)) if !live.connected && !live.disconnecting => {
@@ -674,6 +679,96 @@ impl App {
             }
         }
         self.redraw();
+    }
+
+    /// The connection dropped out: keep showing the last picture and try to get back,
+    /// for `RECONNECT_FOR`. The other monitors' windows close and reopen once back.
+    fn start_reconnecting(&mut self) {
+        let Some(target) = self.target.clone() else { return self.leave_stream() };
+        self.close_extras();
+        self.reconnecting = Some(Instant::now() + RECONNECT_FOR);
+        self.toolbar = ToolbarState::default();
+        let (store, proxy) = (self.store.clone(), self.proxy.clone());
+        let task = self.rt.spawn(async move {
+            let deadline = tokio::time::Instant::now() + RECONNECT_FOR;
+            loop {
+                match net::prepare(&target, &store, None).await {
+                    Ok(prepared @ Prepared::Ready(..)) => {
+                        let result = Ok((prepared, target));
+                        let _ = proxy.send_event(UserEvent::Prepared { view: MAIN, result, code: None });
+                        return;
+                    }
+                    // Not paired any more: nothing to retry.
+                    Ok(Prepared::NeedCode { .. }) => break,
+                    Err(e) => tracing::debug!("reconnecting: {e:#}"),
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+            let _ = proxy.send_event(UserEvent::ReconnectFailed);
+        });
+        self.set_task(MAIN, task);
+        if let Some(main) = self.main() {
+            main.window.set_cursor_visible(true);
+        }
+        self.redraw();
+    }
+
+    /// Gives up reconnecting (it didn't work, or the person stopped it).
+    fn stop_reconnecting(&mut self, message: String) {
+        if self.reconnecting.take().is_none() {
+            return;
+        }
+        if let Some(main) = self.displays.get_mut(&MAIN) {
+            if let Some(task) = main.task.take() {
+                task.abort();
+            }
+            // A session that had just started when the person gave up.
+            main.close();
+            main.live = None;
+        }
+        self.leave_stream();
+        self.screen = Screen::Hosts;
+        self.message = Some(message);
+        self.redraw();
+    }
+
+    fn close_extras(&mut self) {
+        let extras: Vec<usize> = self.displays.keys().copied().filter(|&v| v != MAIN).collect();
+        for view in extras {
+            if let Some(mut display) = self.displays.remove(&view) {
+                display.close();
+                if let Some(task) = display.task.take()
+                    && display.live.is_none()
+                {
+                    task.abort();
+                }
+            }
+        }
+    }
+
+    /// Back from streaming to the window with the host list.
+    fn leave_stream(&mut self) {
+        let Some(main) = self.displays.get_mut(&MAIN) else { return };
+        main.video = None;
+        main.renderer.clear_video();
+        let w = &main.window;
+        w.set_fullscreen(None);
+        w.set_cursor_visible(true);
+        w.set_title("Freemonplay Screen");
+        let _ = w.request_inner_size(PICKER_SIZE);
+        // The other monitors end with the main one.
+        self.close_extras();
+        self.awake = None;
+        self.link = None;
+        self.network = None;
+        self.input_only = false;
+        self.hint_until = None;
+        self.toolbar = ToolbarState::default();
+        self.reconnecting = None;
+        self.target = None;
     }
 
     fn handle(&mut self, action: Action) {
@@ -762,8 +857,9 @@ impl App {
         if self.toolbar.hide_at.is_some_and(|t| now >= t) {
             self.toolbar = ToolbarState::default();
         }
-        let hint = view == MAIN && self.hint_until.is_some_and(|t| now < t) && !self.toolbar.shown;
-        let toolbar = view == MAIN && self.toolbar.shown;
+        let reconnecting = if view == MAIN { self.reconnecting } else { None };
+        let hint = view == MAIN && self.hint_until.is_some_and(|t| now < t) && !self.toolbar.shown && reconnecting.is_none();
+        let toolbar = view == MAIN && self.toolbar.shown && reconnecting.is_none();
         let Some(display) = self.displays.get_mut(&view) else { return };
         let new_frame = display.frames.take();
         if let Some(frame) = &new_frame {
@@ -771,7 +867,8 @@ impl App {
         }
         let fullscreen = display.window.fullscreen().is_some();
         let mut action = None;
-        if (hint || toolbar) && let Some(state) = self.egui_state.as_mut() {
+        let mut stop = false;
+        if (hint || toolbar || reconnecting.is_some()) && let Some(state) = self.egui_state.as_mut() {
             let window = display.window.clone();
             let raw = state.take_egui_input(&window);
             let ctx = self.egui_ctx.clone();
@@ -782,7 +879,11 @@ impl App {
             let bar = ui::Toolbar { host: &self.host_name, detail: &detail, fullscreen };
             let mut rect = None;
             let output = ctx.run_ui(raw, |ui| {
-                if toolbar {
+                if let Some(until) = reconnecting {
+                    let left = until.saturating_duration_since(now).as_secs() + 1;
+                    stop = ui::reconnecting(ui.ctx(), bar.host, left);
+                    ui.ctx().request_repaint_after(Duration::from_millis(500));
+                } else if toolbar {
                     let (clicked, area) = ui::toolbar(ui.ctx(), &bar);
                     action = clicked;
                     rect = Some(area);
@@ -796,6 +897,10 @@ impl App {
             self.present_ui(&window, output);
         } else {
             display.renderer.render(None);
+        }
+        if stop {
+            let message = format!("Disconnected from {}.", self.host_name);
+            return self.stop_reconnecting(message);
         }
         match action {
             Some(ui::ToolbarAction::Disconnect) => return self.disconnect(),
@@ -904,6 +1009,15 @@ impl App {
         if self.host_in_control.load(Ordering::Relaxed) && !matches!(event, WindowEvent::Focused(_)) {
             return;
         }
+        if view == MAIN && self.reconnecting.is_some() {
+            // Nothing to send to; the pointer is for the Stop button.
+            if let (Some(window), Some(state)) = (self.main().map(|d| d.window.clone()), self.egui_state.as_mut())
+                && state.on_window_event(&window, &event).repaint
+            {
+                window.request_redraw();
+            }
+            return;
+        }
         if view == MAIN && self.toolbar_input(&event) {
             return;
         }
@@ -1001,7 +1115,11 @@ impl ApplicationHandler<UserEvent> for App {
                     self.draw_stream(view);
                 }
             }
-            UserEvent::Closed(view, reason) => self.on_closed(view, reason),
+            UserEvent::Closed { view, reason, lost } => self.on_closed(view, reason, lost),
+            UserEvent::ReconnectFailed => {
+                let message = format!("Lost the connection to {} and couldn't reconnect.", self.host_name);
+                self.stop_reconnecting(message);
+            }
         }
     }
 

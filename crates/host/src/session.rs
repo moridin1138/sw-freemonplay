@@ -20,6 +20,7 @@ use crate::platform::{Capture, Injector, VirtualDisplay};
 use crate::rate::{self, RateControl};
 use crate::clipboard::{Hub, Item};
 use crate::kvm::{Anchor, Kvm};
+use crate::parking::{self, Parking};
 use crate::registry::{KvmRole, Registry, SessionGuard, SessionInfo};
 use crate::settings::Settings;
 use crate::store::HostStore;
@@ -44,6 +45,8 @@ pub struct Ctx {
     /// Keyboard and mouse mode, shared by all sessions.
     pub kvm: Arc<Kvm>,
     pub clipboard: Arc<Hub>,
+    /// Displays of screens whose connection was lost, kept a little while for them.
+    pub parking: Arc<Parking>,
 }
 
 #[derive(Default)]
@@ -80,6 +83,7 @@ impl Ctx {
             test_pattern,
             kvm: Kvm::new(clipboard.clone()),
             clipboard,
+            parking: Arc::default(),
         })
     }
 
@@ -127,6 +131,7 @@ impl Ctx {
             ad.withdraw();
         }
         self.endpoint.close(0u32.into(), b"host shutting down");
+        self.parking.clear();
     }
 }
 
@@ -236,25 +241,35 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         Err(e) => return reject(&conn, &mut send, &who, RejectKind::NoCommonCodec, format!("{e:#}")).await,
     };
     tracing::info!(
-        "{who}: creating {}x{}@{} display (hidpi {}), streaming {width}x{height}@{fps} {codec} at {:.1} Mbit/s with {}",
+        "{who}: {}x{}@{} display (hidpi {}, scale {:.0}%), streaming {width}x{height}@{fps} {codec} at {:.1} Mbit/s with {}",
         req.width,
         req.height,
         req.refresh_hz,
         req.hidpi,
+        req.scale * 100.0,
         bitrate as f64 / 1e6,
         encoder.name(),
     );
 
+    // Identifies this screen across connections (one per client monitor).
+    let parking_key = match &hello.screen {
+        Some(screen) => format!("{}/{}", hello.client_id, screen.key),
+        None => hello.client_id.clone(),
+    };
     let slot = Arc::new(FrameSlot::default());
     let mut source = if ctx.test_pattern {
         Source::Pattern(Pattern::start(width, height, fps, slot.clone()))
     } else {
         let display_name = format!("Freemonplay: {screen_name}");
-        let serial = match &hello.screen {
-            Some(screen) => serial_for(&format!("{}/{}", hello.client_id, screen.key)),
-            None => serial_for(&hello.client_id),
+        let serial = serial_for(&parking_key);
+        let kept = {
+            let (parking, key) = (ctx.parking.clone(), parking_key.clone());
+            tokio::task::spawn_blocking(move || parking.take(&key, &req)).await?
         };
-        match start_screen(display_name, serial, req, (width, height, fps), slot.clone()).await {
+        if kept.is_some() {
+            tracing::info!("{who}: back within {} s; reusing its display", parking::GRACE.as_secs());
+        }
+        match start_screen(display_name, serial, req, (width, height, fps), slot.clone(), kept).await {
             Ok(source) => source,
             // Tell the client what went wrong rather than just dropping the connection.
             Err(e) => return reject(&conn, &mut send, &who, RejectKind::Other, format!("host error: {e:#}")).await,
@@ -446,9 +461,19 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     if let Source::Screen { display, capture, .. } = source {
         drop(capture);
         tracing::debug!("{who}: capture stopped");
-        drop(display);
+        if connection_lost(&conn) {
+            tracing::info!("{who}: keeping its display for {} s in case it reconnects", parking::GRACE.as_secs());
+            ctx.parking.park(parking_key, display, req);
+        } else {
+            drop(display);
+        }
     }
     result
+}
+
+/// The connection dropped out (rather than either side closing it on purpose).
+fn connection_lost(conn: &quinn::Connection) -> bool {
+    matches!(conn.close_reason(), Some(quinn::ConnectionError::TimedOut | quinn::ConnectionError::Reset))
 }
 
 /// Sends a copied image on a stream of its own, so a few megabytes of PNG don't hold up
@@ -595,12 +620,16 @@ async fn start_screen(
     req: DisplayRequest,
     (width, height, fps): (u32, u32, u32),
     slot: Arc<FrameSlot>,
+    kept: Option<Arc<VirtualDisplay>>,
 ) -> Result<Source> {
-    let display = Arc::new(
-        tokio::task::spawn_blocking(move || VirtualDisplay::create(&name, serial, &req))
-            .await?
-            .context("creating the virtual display")?,
-    );
+    let display = match kept {
+        Some(display) => display,
+        None => Arc::new(
+            tokio::task::spawn_blocking(move || VirtualDisplay::create(&name, serial, &req))
+                .await?
+                .context("creating the virtual display")?,
+        ),
+    };
     let capture = {
         let display = display.clone();
         tokio::task::spawn_blocking(move || Capture::start(&display, width, height, fps, slot))
@@ -660,6 +689,7 @@ fn sanitize(mut r: DisplayRequest) -> DisplayRequest {
         // Too small for 2x to leave a usable desktop (1080p at 2x would be 960x540).
         r.hidpi = false;
     }
+    r.scale = if r.scale.is_finite() { r.scale.clamp(1.0, 5.0) } else { 1.0 };
     r
 }
 

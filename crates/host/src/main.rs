@@ -16,6 +16,7 @@ mod kvm;
 mod menubar;
 #[cfg(target_os = "macos")]
 mod welcome;
+mod parking;
 mod pattern;
 mod platform;
 mod rate;
@@ -354,6 +355,7 @@ fn probe_display(size: &str) -> Result<()> {
         refresh_hz,
         hidpi,
         size_mm: None,
+        scale: if hidpi { 2.0 } else { 1.0 },
     };
     let display = platform::VirtualDisplay::create("Freemonplay probe", 1, &req)?;
     println!("virtual display {} is up; removing it in 3 s", display.id());

@@ -32,6 +32,7 @@ crates/
     clipboard.rs      clipboard sharing hub
     rate.rs           adaptive bitrate and the send window
     registry.rs       live sessions, for the menu bar (stats, Disconnect)
+    parking.rs        displays of screens whose connection dropped out, kept 15 s for them
     store.rs          host id, pairing code, paired clients (token hashes)
     encoder.rs        codec negotiation; OpenH264 software fallback
     frame.rs          FrameSlot: newest-frame-wins handoff from capture to encoder
@@ -49,7 +50,7 @@ crates/
                       encoder, asynchronous MFT, same D3D11 device: zero copy), d3d.rs (the
                       shared device), input.rs (SendInput), clipboard.rs, display.rs (virtual
                       monitors: Extend via the display configuration API, closest listed
-                      mode, display scale 200% for HiDPI screens, removed on disconnect),
+                      mode, the screen's own display scale, removed on disconnect),
                       driver.rs (installs the Virtual Display Driver with 3 monitors and a
                       resolution list), system.rs (firewall rule, Run key, elevation, one
                       running copy)
@@ -107,7 +108,11 @@ message saying which side to update. Clients only forget a pairing on
 5. Send `Welcome`, open the video stream, register the session for the menu bar.
 6. Run until any side stops: the encoder thread, the sender, the control reader (input,
    stats, keyframe requests) and a watchdog that sends a `Notice` if no frames arrive.
-7. Dropping the session tears down capture and the virtual display.
+7. Dropping the session tears down capture and the virtual display. If the connection
+   dropped out (timed out or reset, rather than closed by either side), the display is
+   parked (`parking.rs`) for 15 s under the screen's identity (client id and monitor); a
+   session from that screen asking for the same display picks it up again, with its
+   windows where they were.
 
 **Client** (`client/src/net.rs`, `app.rs`):
 1. `prepare`: resolve and connect; decide between a saved token and asking for the code.
@@ -115,6 +120,9 @@ message saying which side to update. Clients only forget a pairing on
    thread, then read video and write control messages until the connection ends.
 3. Events go to the UI thread through winit's `EventLoopProxy`, tagged with the display
    they belong to: `Prepared`, `Connected`, `Frame`, `Closed`.
+4. A `Closed` that says the connection dropped out keeps the last picture on screen and
+   retries `prepare` every second for 15 s (`start_reconnecting`), then goes back to the
+   list. The other monitors' windows close and reopen once the main one is back.
 
 ## Threads and the frame path
 

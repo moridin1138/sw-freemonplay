@@ -167,7 +167,8 @@ pub fn run(
     let mut decoder = match new_decoder(codec, deliver, gpu_adapter) {
         Ok(d) => d,
         Err(e) => {
-            let _ = proxy.send_event(UserEvent::Closed(view, format!("can't start {codec} decoder: {e:#}")));
+            let reason = format!("can't start {codec} decoder: {e:#}");
+            let _ = proxy.send_event(UserEvent::Closed { view, reason, lost: false });
             return;
         }
     };

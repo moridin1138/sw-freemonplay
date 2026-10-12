@@ -213,10 +213,10 @@ fn best_mode(modes: &[(u32, u32)], width: u32, height: u32) -> Option<(u32, u32)
         .copied()
 }
 
-/// The display scale (percent) for a screen: 200% for a HiDPI one (a Retina Mac, or a
-/// Windows PC at 150% or more) so things appear the size they do there, else 100%.
+/// The display scale (percent) for a screen: its own, so things appear the size they do
+/// there (a Retina Mac 200%, a PC at 150% 150%). `set_scale` takes the nearest step.
 fn scale_for(req: &DisplayRequest) -> u32 {
-    if req.hidpi { 200 } else { 100 }
+    (req.scale * 100.0).round() as u32
 }
 
 /// Removes virtual monitors that no session is using from the desktop.

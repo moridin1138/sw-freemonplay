@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub mod hid;
 pub mod pairing;
 
-pub const PROTOCOL_VERSION: u32 = 10;
+pub const PROTOCOL_VERSION: u32 = 11;
 pub const ALPN: &[u8] = b"freemonplay/1";
 pub const SERVICE_TYPE: &str = "_freemonplay._udp.local.";
 pub const DEFAULT_PORT: u16 = 47800;
@@ -251,6 +251,9 @@ pub struct DisplayRequest {
     pub hidpi: bool,
     /// Physical size, if known. Lets the host OS pick sensible text sizes.
     pub size_mm: Option<(u32, u32)>,
+    /// The screen's own display scale (1.0 = 100%, 1.5 = 150%), so a host that can scale
+    /// in finer steps than `hidpi` (Windows) shows things the size they'd be there.
+    pub scale: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -418,7 +421,7 @@ mod tests {
             client_id: "id".into(),
             client_name: "name".into(),
             auth: Auth::Pake(vec![1; 33]),
-            display: DisplayRequest { width: 1920, height: 1080, refresh_hz: 60, hidpi: false, size_mm: None },
+            display: DisplayRequest { width: 1920, height: 1080, refresh_hz: 60, hidpi: false, size_mm: None, scale: 1.0 },
             codecs: vec![Codec::H265, Codec::H264],
             kvm: None,
             input_only: false,

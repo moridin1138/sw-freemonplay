@@ -199,6 +199,32 @@ pub fn toolbar(ctx: &egui::Context, bar: &Toolbar) -> (Option<ToolbarAction>, eg
     (action, area.response.rect)
 }
 
+/// After the connection dropped out: what's happening, and a way to stop. Returns whether
+/// Stop was clicked.
+pub fn reconnecting(ctx: &egui::Context, host: &str, seconds_left: u64) -> bool {
+    let mut stop = false;
+    egui::Area::new(egui::Id::new("reconnecting")).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+        egui::Frame::new()
+            .fill(CARD)
+            .stroke(Stroke::new(1.0, CARD_EDGE))
+            .corner_radius(CornerRadius::same(12))
+            .inner_margin(egui::Margin::same(20))
+            .shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(120) })
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(format!("Lost the connection to {host}")).strong());
+                        ui.label(RichText::new(format!("Reconnecting… ({seconds_left} s)")).color(MUTED));
+                    });
+                    ui.add_space(16.0);
+                    stop = ui.add(egui::Button::new("Stop").min_size(vec2(80.0, 32.0))).clicked();
+                });
+            });
+    });
+    stop
+}
+
 /// The first few seconds of a stream: how to get the toolbar back.
 pub fn stream_hint(ctx: &egui::Context) {
     egui::Area::new(egui::Id::new("hint")).anchor(egui::Align2::CENTER_TOP, [0.0, 24.0]).show(ctx, |ui| {
@@ -388,10 +414,8 @@ fn hosts(
     ui.add_space(10.0);
     ui.label(
         RichText::new(format!(
-            "While connected: the pointer at the top edge shows Disconnect and Full Screen. Or {} disconnects · {} full screen on or off · {} quits",
+            "While connected, move the pointer to the top edge for Disconnect and Full Screen, or press {} to disconnect.",
             shortcut('D'),
-            shortcut('F'),
-            shortcut('Q')
         ))
         .color(MUTED)
         .small(),
