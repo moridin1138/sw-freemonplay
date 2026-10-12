@@ -419,7 +419,7 @@ impl Renderer {
     }
 
     /// Draws the latest video frame, if any, with the interface on top, and presents.
-    pub fn render(&mut self, ui: Option<UiFrame>) {
+    pub fn render(&mut self, mut ui: Option<UiFrame>) {
         // egui's texture changes must be applied even if this frame can't be shown: the first
         // set holds the whole font atlas, and later ones only patch it.
         if let Some(ui) = &ui {
@@ -435,11 +435,11 @@ impl Renderer {
                 wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => Some(f),
                 wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                     surface.configure(&self.device, &self.config);
-                    self.free_ui_textures(ui.as_ref());
+                    self.free_ui_textures(ui.as_mut());
                     return;
                 }
                 _ => {
-                    self.free_ui_textures(ui.as_ref());
+                    self.free_ui_textures(ui.as_mut());
                     return;
                 }
             },
@@ -447,7 +447,7 @@ impl Renderer {
         let view = match (&frame, &self.offscreen) {
             (Some(f), _) => f.texture.create_view(&wgpu::TextureViewDescriptor::default()),
             (None, Some(t)) => t.create_view(&wgpu::TextureViewDescriptor::default()),
-            (None, None) => return,
+            (None, None) => return self.free_ui_textures(ui.as_mut()),
         };
 
         if let Some(p) = &self.planes {
@@ -499,7 +499,7 @@ impl Renderer {
         if let Some(frame) = frame {
             self.queue.present(frame);
         }
-        self.free_ui_textures(ui.as_ref());
+        self.free_ui_textures(ui.as_mut());
     }
 
     /// The off-screen image as tightly packed RGBA rows (headless renderers only).
@@ -534,11 +534,14 @@ impl Renderer {
         Ok(out)
     }
 
-    fn free_ui_textures(&mut self, ui: Option<&UiFrame>) {
+    /// Frees the textures egui is done with, and marks the frame's texture changes as handled
+    /// (egui checks, in debug builds, that none are dropped unapplied).
+    fn free_ui_textures(&mut self, ui: Option<&mut UiFrame>) {
         if let Some(ui) = ui {
             for id in &ui.textures.free {
                 self.egui.free_texture(id);
             }
+            ui.textures.clear();
         }
     }
 
