@@ -65,7 +65,10 @@ fn wifi() -> Option<NetworkInfo> {
     };
     let width = if mhz > 0 { format!(" {mhz} MHz") } else { String::new() };
     let summary =
-        format!("{generation}, {band_name} (channel {number}{width}), signal {rssi} dBm, link {rate:.0} Mbit/s");
+        format!(
+            "{generation}, {band_name} (channel {number}{width}), signal {rssi} dBm{}",
+            if rate >= 1.0 { format!(", link {rate:.0} Mbit/s") } else { String::new() }
+        );
 
     let mut advice = Vec::new();
     if band == CWChannelBand::Band2GHz {

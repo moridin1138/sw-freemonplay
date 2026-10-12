@@ -161,7 +161,15 @@ pub async fn run(incoming: quinn::Incoming, ctx: Arc<Ctx>) {
 }
 
 async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
-    let conn = incoming.await?;
+    let remote = incoming.remote_address();
+    let conn = match incoming.await {
+        Ok(conn) => conn,
+        // Screens try every address they know and drop the slower attempts.
+        Err(e) => {
+            tracing::debug!("{remote}: connection attempt abandoned: {e}");
+            return Ok(());
+        }
+    };
     let (mut send, mut recv) = match timeout(HANDSHAKE_TIMEOUT, conn.accept_bi()).await {
         Ok(Ok(stream)) => stream,
         // The client hung up on purpose before starting (e.g. to ask the user for the code,

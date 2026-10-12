@@ -6,6 +6,8 @@ publishes it as the release notes.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-12
+
 Hosts and screens must both be updated: the protocol changed (version 11).
 
 ### Changed
@@ -66,9 +68,8 @@ Hosts and screens must both be updated: the protocol changed (version 11).
   reopens it.
 - **Windows host, preview:** a Windows PC can now get extra screens too. Each screen
   extends the desktop onto a virtual monitor at its own resolution, through the signed,
-  MIT licensed Virtual Display Driver (install it once, as administrator, with
-  `freemonplay-host --install-display-driver <folder>`; without it, screens mirror the
-  primary monitor). Windows.Graphics.Capture (cursor included), scaled and converted to
+  MIT licensed Virtual Display Driver, which the host installer sets up (without it,
+  screens mirror the primary monitor). Windows.Graphics.Capture (cursor included), scaled and converted to
   NV12 on the GPU, hardware encoded by Media Foundation (H.264 or HEVC, e.g. Intel Quick
   Sync) on the same device, so frames never pass through system memory; OpenH264 is the
   fallback. Input by `SendInput`, and the shared clipboard. Tested on a Surface (Iris Xe)
@@ -181,6 +182,7 @@ First release.
 - App icon and menu bar icon; local signing identity so permissions survive rebuilds.
 - GPL-3.0-or-later license, CI for all three OSes, release builds for `v*` tags.
 
-[Unreleased]: https://github.com/moridin1138/sw-freemonplay/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/moridin1138/sw-freemonplay/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/moridin1138/sw-freemonplay/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/moridin1138/sw-freemonplay/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/moridin1138/sw-freemonplay/releases/tag/v0.1.0

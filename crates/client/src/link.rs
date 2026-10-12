@@ -40,6 +40,12 @@ fn wired() -> NetworkInfo {
 
 /// Advice for a Wi-Fi link, from its band, signal (0 to 100) and link rate (Mbit/s).
 #[cfg_attr(not(any(target_os = "windows", target_os = "macos", target_os = "linux")), allow(dead_code))]
+/// ", link 866 Mbit/s", or nothing while the rate isn't known yet (just after joining).
+#[cfg_attr(not(any(target_os = "windows", target_os = "macos", target_os = "linux")), allow(dead_code))]
+fn link_text(mbps: f64) -> String {
+    if mbps >= 1.0 { format!(", link {mbps:.0} Mbit/s") } else { String::new() }
+}
+
 fn wifi_advice(two_point_four: bool, signal: u32, link_mbps: u32) -> Vec<String> {
     let mut advice = Vec::new();
     if two_point_four {
@@ -170,7 +176,7 @@ mod imp {
                 _ => ", 5 GHz or higher".into(),
             };
             let tuned = if streaming { ", low-latency mode on" } else { "" };
-            let summary = format!("{generation}{band}, signal {signal}%, link {link_mbps} Mbit/s{tuned}");
+            let summary = format!("{generation}{band}, signal {signal}%{}{tuned}", super::link_text(link_mbps as f64));
             let advice = super::wifi_advice(two_point_four, signal, link_mbps);
             Ok((streaming.then_some(inner), Some(NetworkInfo { summary, advice })))
         }
@@ -220,7 +226,7 @@ mod imp {
         };
         // RSSI as a rough 0 to 100 quality, as Windows reports it (-100 dBm is 0, -50 is 100).
         let signal = ((rssi + 100) * 2).clamp(0, 100) as u32;
-        let summary = format!("{generation}{band_name}, signal {rssi} dBm, link {rate:.0} Mbit/s");
+        let summary = format!("{generation}{band_name}, signal {rssi} dBm{}", super::link_text(rate));
         let advice = super::wifi_advice(band == Some(CWChannelBand::Band2GHz), signal, rate as u32);
         Ok((None, Some(NetworkInfo { summary, advice })))
     }
@@ -273,7 +279,7 @@ mod imp {
             5925..=7125 => ", 6 GHz",
             _ => "",
         };
-        let summary = format!("Wi-Fi{band}, signal {signal}%, link {link_mbps} Mbit/s");
+        let summary = format!("Wi-Fi{band}, signal {signal}%{}", super::link_text(link_mbps as f64));
         let advice = super::wifi_advice((2400..=2500).contains(&mhz), signal, link_mbps);
         Ok((None, Some(NetworkInfo { summary, advice })))
     }

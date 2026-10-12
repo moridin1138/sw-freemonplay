@@ -1337,7 +1337,7 @@ dependencies = [
 
 [[package]]
 name = "fmp-proto"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "hmac",
@@ -1401,7 +1401,7 @@ dependencies = [
 
 [[package]]
 name = "freemonplay-host"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -1442,7 +1442,7 @@ dependencies = [
 
 [[package]]
 name = "freemonplay-screen"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "arboard",
