@@ -16,6 +16,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -29,6 +30,18 @@ jobs:
 
           **Screens:** download the client for each device: macOS, Windows or Linux. On Windows, SmartScreen may warn because the program isn't signed; choose More info, then Run anyway. Linux needs GStreamer's plugins: `sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-libav` (plus `intel-media-va-driver` for Intel GPU decoding).
           EOF
+          # This version's section of CHANGELOG.md (from "## [x.y.z]" to the next "## [").
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > changes.md
+          if [ -s changes.md ]; then
+            { echo; echo "## What's new"; cat changes.md; } >> notes.md
+          else
+            echo "::warning::CHANGELOG.md has no section for $version"
+          fi
           gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "freemonplay $GITHUB_REF_NAME" \

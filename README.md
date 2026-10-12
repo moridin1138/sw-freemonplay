@@ -4,22 +4,26 @@
 
 Turn any spare laptop, tablet or PC into an extra monitor for your Mac, over the network. Free and open source.
 
-The **host** (the computer that wants more screens) creates a real virtual monitor for each **client** that connects. The OS treats it like a plugged-in display: drag windows onto it, arrange it in Display settings, use your normal mouse on it. The host captures that monitor, encodes it as H.264 and streams it to the client. The client shows it full screen and sends touch, mouse and keyboard back.
+The **host** (the computer that wants more screens) creates a real virtual monitor for each **client** screen that connects. The OS treats it like a plugged-in display: drag windows onto it, arrange it in Display settings, use your normal mouse on it. The host captures that monitor, encodes it as H.264 and streams it to the client. The client shows it full screen and sends touch, mouse and keyboard back.
 
-Virtual monitors don't use the GPU's display engines, so the "1 or 2 external displays" limit on base Apple Silicon Macs doesn't apply. Each client is one more screen.
+Virtual monitors don't use the GPU's display engines, so the "1 or 2 external displays" limit on base Apple Silicon Macs doesn't apply. Each client monitor is one more screen, and a client with several monitors can lend all of them.
+
+See [CHANGELOG.md](CHANGELOG.md) for what's new, [ARCHITECTURE.md](ARCHITECTURE.md) for how it works and [BACKLOG.md](BACKLOG.md) for what's next.
 
 ## Status
 
 | Part | macOS | Windows | Linux |
 |---|---|---|---|
-| Client (view + input) | ✅ | builds (cross-compiled); not yet run on Windows | decoder path tested on macOS; not yet run on Linux |
+| Client (view + input) | ✅ | ✅ (tested on a Surface, Iris Xe) | builds; not yet run on Linux |
 | Host: virtual display | ✅ `CGVirtualDisplay` | planned: Virtual Display Driver (IDD) | planned: Mutter / wlroots / xrandr |
 | Host: capture | ✅ ScreenCaptureKit | planned: Windows.Graphics.Capture | planned: PipeWire |
 | Host: input injection | ✅ CGEvent | planned: SendInput | planned: libei / uinput |
 | Host: hardware encoding | ✅ VideoToolbox (H.264, HEVC) | planned: Media Foundation / NVENC | planned: VAAPI |
-| Client: decoding (H.264, HEVC) | ✅ VideoToolbox (hardware) | Media Foundation, DXVA on the GPU (software fallback) | GStreamer: VAAPI hardware, else system software decoder |
+| Client: decoding (H.264, HEVC) | ✅ VideoToolbox (hardware) | ✅ Media Foundation, DXVA on the GPU (software fallback) | GStreamer: VAAPI hardware, else system software decoder |
+| Client: zero-copy display | ✅ Metal | ✅ Direct3D 12 | planned |
+| Client: several monitors | ✅ | ✅ (not yet tested with real extra monitors) | ✅ (untested) |
 
-Tested so far: virtual display creation (including HiDPI) on macOS 15 / M4, plus the full network → encode → decode → render → input path using the host's `--test-pattern` mode. The real capture path needs Screen Recording permission (see below), so it hasn't been run end to end yet.
+Tested end to end: a Mac host (macOS 15, M4) streaming to Mac and Windows clients over Wi-Fi. `freemonplay-client --self-test` checks a machine's decoder and GPU path without a window.
 
 ## Build
 
@@ -92,7 +96,7 @@ On each device that should become a screen:
 ./freemonplay-client
 ```
 
-A window lists the computers running freemonplay on your network. Drag it to the monitor you want to use, click **Connect**, and enter the pairing code shown in the host's menu the first time (after that it reconnects without one). The screen fills that monitor; disconnecting brings the list back. Hosts on other networks can be reached with **Connect by address**, and **Options** sets full screen, sharpness (1x/2x), codec, vsync and whether to keep the screen awake while connected (on by default).
+A window lists the computers running freemonplay on your network. Drag it to the monitor you want to use, click **Connect**, and enter the pairing code shown in the host's menu the first time (after that it reconnects without one). The screen fills that monitor; disconnecting brings the list back. If the device has more monitors, tick them under **Also use these monitors** and each becomes another screen on the host (arrange them in the host's Display settings; they're remembered). Hosts on other networks can be reached with **Connect by address**, and **Options** sets full screen, sharpness (1x/2x), codec, vsync and whether to keep the screen awake while connected (on by default).
 
 Useful options:
 
@@ -101,6 +105,8 @@ Useful options:
 | `client --host 192.168.1.20` | Connect straight away instead of showing the list (add `--code 123456` the first time) |
 | `client --windowed 1280x800` | Stream in a window instead of full screen |
 | `client --monitor 1` | Open the window on a different monitor |
+| `client --all-monitors` | Use all of this device's monitors, each as its own screen |
+| `client --self-test` | Check this machine's video decoder and GPU display path, then exit (no window needed) |
 | `client --scale 2` | Force Retina-style 2x rendering (`auto` uses it on high-density screens) |
 | `client --allow-sleep` | Let the screen dim, lock or sleep while connected (by default it's kept awake) |
 | `client --no-vsync` | Show frames without waiting for the display refresh: up to one refresh (about 16 ms at 60 Hz) less latency, but can tear |
@@ -112,36 +118,20 @@ Useful options:
 | `host --test-pattern` | Stream a generated picture instead of a virtual display (no permissions needed; any OS) |
 | `host --probe-display 2732x2048@2x` | Create a virtual display for 3 s to check the OS supports it |
 
-Client shortcuts while connected (not sent to the host): **Ctrl+Alt+Shift+D** disconnects (back to the list), **Ctrl+Alt+Shift+F** toggles full screen, **Ctrl+Alt+Shift+Q** quits.
+Client shortcuts while connected (not sent to the host): **Ctrl+Alt+Shift+D** disconnects all screens (back to the list), **Ctrl+Alt+Shift+F** toggles full screen, **Ctrl+Alt+Shift+Q** quits.
 
 Quick test on one Mac: run the host, then `freemonplay-client --host 127.0.0.1 --windowed 1280x800`. A new display appears in System Settings > Displays. Drag a window onto it and it shows up in the client window.
 
 ## How it works
 
-```
-crates/
-  proto/    wire protocol shared by both sides
-  host/     mDNS advert, QUIC server, per-client session
-    platform/macos/   virtual_display.rs, capture.rs, input.rs
-    platform/macos/videotoolbox.rs   hardware H.264, zero-copy from capture
-    encoder.rs        encoder selection; OpenH264 software fallback
-  client/   discovery, QUIC client, wgpu renderer, input mapping
-    decode/         videotoolbox.rs (macOS), mediafoundation.rs (Windows),
-                    gstreamer.rs (Linux), software.rs (OpenH264 last resort)
-```
-
-- **Codecs:** the client lists the codecs it can decode, preferred first, and the host picks the first it can encode. Clients put HEVC first only when their GPU decodes it (HEVC is about 40% smaller than H.264 for the same quality, but costs more CPU in software). Hosts without a hardware HEVC encoder fall back to H.264.
-- **Transport:** one QUIC connection per screen (`quinn`). Client to host is a control stream (hello, input, keyframe requests). Host to client is a video stream of H.264 access units. Messages are length-prefixed `postcard`.
-- **Latency measurement:** each side times what it can on its own clock: the host from capture to sent, the client from received to shown, and QUIC tracks the round trip. The host adds them up (host + half the round trip + client) and shows the estimate in the menu. It leaves out capture's own delay and the wait for the client display's next refresh, so the real figure is somewhat higher.
-- **Latency:** the host keeps only the newest captured frame. If encoding or the network falls behind, frames are skipped *before* encoding, so the picture never queues up. The client does the same after decoding.
-- **Pairing:** the first time, the client and host run SPAKE2 (a password-authenticated key exchange) with the host's 6 digit code, and each proves it got the same key with an HMAC bound to this TLS connection. The code never crosses the network, someone in the middle gets one online guess per attempt (five failures rotate the code), and a relayed connection fails even with the right code. The host then issues a random token (storing only its hash) and the client pins the host's certificate fingerprint for later connections.
-- **Display identity:** each client gets a stable serial number, so macOS remembers where you arranged that screen.
+One QUIC connection per screen: the host captures its virtual display, hardware encodes it (H.264 or HEVC, negotiated) and streams it; the client decodes with the OS's decoder, draws it with wgpu and sends input back. Pairing uses SPAKE2 with the host's 6 digit code, after which the client reconnects with a token. Frames are skipped rather than queued whenever anything falls behind, so the picture never lags. Details, including threads, zero copy, several monitors and the protocol, are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Known limitations and next steps
 
 - **Hardware encoding is macOS only.** On a Mac, captured frames go straight from ScreenCaptureKit into the hardware encoder with no copy (VideoToolbox's low-latency mode, Constrained High profile). Other hosts would fall back to OpenH264, which is CPU-hungry above 1440p.
 - **Clients decode with the OS's decoder**: VideoToolbox on macOS, Media Foundation with DXVA on Windows, GStreamer (VAAPI where available) on Linux.
-- **Mac clients draw the decoder's output directly** (zero copy, through a CoreVideo Metal texture cache): at 1080p60 that took client CPU from 11.7% to 3.6% and received-to-shown time from 27 ms to under 2 ms. Set `FMP_ZERO_COPY=0` to fall back to copying if a GPU ever misbehaves. Windows and Linux clients still copy decoded pictures through system memory.
+- **Mac and Windows clients draw the decoder's output directly** (zero copy). On a Mac at 1080p60 that took client CPU from 11.7% to 3.6% and received-to-shown time from 27 ms to under 2 ms; on a Surface it cut decoding from 4.9 to 1.8 ms per frame. Set `FMP_ZERO_COPY=0` to fall back to copying if a GPU ever misbehaves. Linux clients still copy decoded pictures through system memory.
+- **Wi-Fi adds most of the latency.** A typical figure is about 50 ms in total, of which the network is roughly two thirds. Wired Ethernet, 5 GHz Wi-Fi and turning off the client's Wi-Fi power saving all help.
 - **HEVC on Windows clients** needs Microsoft's "HEVC Video Extensions" (often preinstalled by PC makers). Without them, Windows clients use H.264.
 - **HEVC on Linux clients** is offered automatically only with a VAAPI HEVC decoder (`vah265dec`/`vaapih265dec`); `--codec h265` forces it in software via `avdec_h265`.
 - **Bitrate control with the software encoder is loose.** Frame skipping is off to avoid stutter, and OpenH264 can't cap bitrate strictly without it. That's fine on a LAN.
