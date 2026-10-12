@@ -30,6 +30,8 @@ pub struct Options {
     pub scale: Scale,
     pub vsync: bool,
     pub codec: CodecArg,
+    /// Stop this screen dimming, locking or sleeping while connected.
+    pub keep_awake: bool,
 }
 
 pub enum Action {
@@ -170,6 +172,7 @@ fn hosts(ui: &mut egui::Ui, hosts: &[HostRow], address: &mut String, options: &m
                 ui.selectable_value(&mut options.codec, CodecArg::H264, "H.264");
                 ui.selectable_value(&mut options.codec, CodecArg::H265, "HEVC");
             });
+        ui.checkbox(&mut options.keep_awake, "Keep this screen awake while connected");
         ui.checkbox(&mut options.vsync, "Wait for the display refresh (no tearing)")
             .on_hover_text("Turning this off saves up to one refresh of latency, but the picture can tear.");
     });

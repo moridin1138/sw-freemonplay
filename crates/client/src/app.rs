@@ -15,6 +15,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
+use crate::awake::KeepAwake;
 use crate::decode::{self, FrameSlot};
 use crate::input;
 use crate::net::{self, Credentials, HostList, Prepared, Target};
@@ -80,6 +81,8 @@ pub struct App {
     shown: ShownStats,
     /// Show the shortcut hint over the video until then.
     hint_until: Option<Instant>,
+    /// Keeps this screen on while connected (when the option is set).
+    awake: Option<KeepAwake>,
     pub exit_error: Option<String>,
 }
 
@@ -120,6 +123,7 @@ impl App {
             held_keys: HashSet::new(),
             shown: ShownStats::new(),
             hint_until: None,
+            awake: None,
             exit_error: None,
         }
     }
@@ -241,6 +245,7 @@ impl App {
             },
             store: self.store.clone(),
             display,
+            gpu_adapter: self.renderer.as_ref().and_then(Renderer::gpu_adapter),
             outgoing: out_rx,
             outgoing_tx: out_tx.clone(),
             frames: self.frames.clone(),
@@ -280,6 +285,9 @@ impl App {
         }
         self.screen = Screen::Streaming;
         self.video = Some((width, height));
+        if self.options.keep_awake {
+            self.awake = KeepAwake::start();
+        }
         self.hint_until = Some(Instant::now() + Duration::from_secs(4));
         self.repaint_at = self.hint_until;
         if let Some(w) = &self.window {
@@ -305,6 +313,7 @@ impl App {
     fn on_closed(&mut self, reason: String) {
         let Some(live) = self.live.take() else { return };
         self.task = None;
+        self.awake = None;
         self.release_all_keys();
         self.video = None;
         self.hint_until = None;

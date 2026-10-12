@@ -92,7 +92,7 @@ On each device that should become a screen:
 ./freemonplay-client
 ```
 
-A window lists the computers running freemonplay on your network. Drag it to the monitor you want to use, click **Connect**, and enter the pairing code shown in the host's menu the first time (after that it reconnects without one). The screen fills that monitor; disconnecting brings the list back. Hosts on other networks can be reached with **Connect by address**, and **Options** sets full screen, sharpness (1x/2x), codec and vsync.
+A window lists the computers running freemonplay on your network. Drag it to the monitor you want to use, click **Connect**, and enter the pairing code shown in the host's menu the first time (after that it reconnects without one). The screen fills that monitor; disconnecting brings the list back. Hosts on other networks can be reached with **Connect by address**, and **Options** sets full screen, sharpness (1x/2x), codec, vsync and whether to keep the screen awake while connected (on by default).
 
 Useful options:
 
@@ -102,6 +102,7 @@ Useful options:
 | `client --windowed 1280x800` | Stream in a window instead of full screen |
 | `client --monitor 1` | Open the window on a different monitor |
 | `client --scale 2` | Force Retina-style 2x rendering (`auto` uses it on high-density screens) |
+| `client --allow-sleep` | Let the screen dim, lock or sleep while connected (by default it's kept awake) |
 | `client --no-vsync` | Show frames without waiting for the display refresh: up to one refresh (about 16 ms at 60 Hz) less latency, but can tear |
 | `host --max-fps 30 --bitrate-mbps 8` | Lower bandwidth |
 | `host --encoder software` | Force the OpenH264 software encoder (default `auto` prefers hardware) |

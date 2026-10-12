@@ -7,10 +7,13 @@
 //!   Ctrl+Alt+Shift+Q  quit
 
 mod app;
+mod awake;
 mod decode;
 mod input;
 mod net;
 mod render;
+#[cfg(target_os = "windows")]
+mod render_d3d12;
 #[cfg(target_os = "macos")]
 mod render_metal;
 mod store;
@@ -53,6 +56,9 @@ struct Args {
     /// Saves up to one refresh of latency (about 16 ms at 60 Hz) but the picture can tear.
     #[arg(long)]
     no_vsync: bool,
+    /// Let this screen dim, lock or sleep while connected (by default it's kept awake).
+    #[arg(long)]
+    allow_sleep: bool,
     /// Name this screen shows up as on the host. Defaults to this computer's hostname.
     #[arg(long)]
     name: Option<String>,
@@ -106,7 +112,13 @@ fn main() -> Result<()> {
         hosts,
         args.name.clone().unwrap_or_else(hostname),
         app::Startup { monitor: args.monitor, windowed, host: args.host, code: args.code },
-        ui::Options { fullscreen: windowed.is_none(), scale: args.scale, vsync: !args.no_vsync, codec: args.codec },
+        ui::Options {
+            fullscreen: windowed.is_none(),
+            scale: args.scale,
+            vsync: !args.no_vsync,
+            codec: args.codec,
+            keep_awake: !args.allow_sleep,
+        },
     );
     event_loop.run_app(&mut app)?;
     rt.shutdown_timeout(Duration::from_millis(300));

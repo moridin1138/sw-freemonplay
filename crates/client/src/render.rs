@@ -85,12 +85,17 @@ struct Planes {
     width: u32,
     height: u32,
     nv12: bool,
+    /// Our own textures that frames are copied into (reusable for the next frame), as
+    /// opposed to a decoder's texture imported for zero copy.
+    owned: bool,
     y: wgpu::Texture,
     /// U plane (I420) or interleaved CbCr (NV12).
     u: wgpu::Texture,
     /// V plane; NV12 has none.
     v: Option<wgpu::Texture>,
     bind_group: wgpu::BindGroup,
+    /// Keeps a decoder's buffer reserved while the GPU may still read it.
+    lease: Option<Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 pub struct Renderer {
@@ -109,25 +114,27 @@ pub struct Renderer {
     egui: egui_wgpu::Renderer,
     #[cfg(target_os = "macos")]
     metal: Option<crate::render_metal::MetalImport>,
+    #[cfg(target_os = "windows")]
+    d3d12: Option<crate::render_d3d12::D3d12Import>,
 }
 
 impl Renderer {
     /// `vsync: false` presents immediately instead of at the next display refresh: up to one
     /// refresh less latency, but the picture can tear (most visibly in full screen).
     pub fn new(window: Arc<Window>, vsync: bool) -> Result<Self> {
-        let instance = wgpu::Instance::default();
-        let surface = instance.create_surface(window.clone())?;
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .context("no usable GPU adapter")?;
+        let (surface, adapter) = pick_adapter(&window)?;
+        // Zero copy on Windows imports the decoder's NV12 textures.
+        #[cfg(target_os = "windows")]
+        let required_features = adapter.features() & wgpu::Features::TEXTURE_FORMAT_NV12;
+        #[cfg(not(target_os = "windows"))]
+        let required_features = wgpu::Features::empty();
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("freemonplay"),
+            required_features,
             required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
             ..Default::default()
         }))?;
+        tracing::info!("rendering with {:?} on {}", adapter.get_info().backend, adapter.get_info().name);
 
         let caps = surface.get_capabilities(&adapter);
         // Video is already gamma encoded, so prefer a non-sRGB surface and write it as is.
@@ -245,6 +252,8 @@ impl Renderer {
         });
         #[cfg(target_os = "macos")]
         let metal = crate::render_metal::MetalImport::new(&device);
+        #[cfg(target_os = "windows")]
+        let d3d12 = crate::render_d3d12::D3d12Import::new(&device, &adapter);
         let egui = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
 
         Ok(Self {
@@ -262,6 +271,8 @@ impl Renderer {
             egui,
             #[cfg(target_os = "macos")]
             metal,
+            #[cfg(target_os = "windows")]
+            d3d12,
         })
     }
 
@@ -275,6 +286,27 @@ impl Renderer {
     }
 
     pub fn upload(&mut self, frame: &YuvFrame) {
+        #[cfg(target_os = "windows")]
+        if let decode::Planes::Shared(shared) = &frame.planes {
+            // Zero copy: draw the decoder's shared texture through views of its two planes.
+            let imported = match &mut self.d3d12 {
+                Some(d3d12) => d3d12.import(&self.device, shared, frame.width, frame.height),
+                None => Err(anyhow::anyhow!("no Direct3D 12 import")),
+            };
+            match imported {
+                Ok(texture) => {
+                    let lease: Arc<dyn std::any::Any + Send + Sync> = shared.lease.clone();
+                    self.planes = Some(self.bind_imported_nv12(frame.width, frame.height, texture, lease));
+                }
+                Err(e) => {
+                    // The decoder switches to copied frames; this one is skipped.
+                    tracing::warn!("zero-copy display failed ({e:#}); copying frames from now on");
+                    shared.renderer_gave_up.store(true, std::sync::atomic::Ordering::Relaxed);
+                    self.d3d12 = None;
+                }
+            }
+            return;
+        }
         #[cfg(target_os = "macos")]
         if let decode::Planes::Native(buffer) = &frame.planes {
             // Zero copy: draw straight from the decoder's buffer.
@@ -297,7 +329,7 @@ impl Renderer {
             return;
         }
         let nv12 = matches!(frame.planes, decode::Planes::Nv12 { .. });
-        if self.planes.as_ref().is_none_or(|p| p.width != frame.width || p.height != frame.height || p.nv12 != nv12) {
+        if self.planes.as_ref().is_none_or(|p| !p.owned || p.width != frame.width || p.height != frame.height || p.nv12 != nv12) {
             self.planes = Some(self.make_planes(frame.width, frame.height, nv12));
         }
         let planes = self.planes.as_ref().unwrap();
@@ -314,7 +346,18 @@ impl Renderer {
             }
             #[cfg(target_os = "macos")]
             decode::Planes::Native(_) => unreachable!("handled above"),
+            #[cfg(target_os = "windows")]
+            decode::Planes::Shared(_) => unreachable!("handled above"),
         }
+    }
+
+    /// The GPU the renderer runs on, for a decoder to share frames with (Windows: the
+    /// adapter LUID). `None` where zero copy doesn't need it or isn't available.
+    pub fn gpu_adapter(&self) -> Option<u64> {
+        #[cfg(target_os = "windows")]
+        return self.d3d12.as_ref().map(crate::render_d3d12::D3d12Import::adapter_luid);
+        #[cfg(not(target_os = "windows"))]
+        return None;
     }
 
     /// Largest texture egui may create.
@@ -388,7 +431,16 @@ impl Renderer {
                 self.egui.render(&mut pass.forget_lifetime(), &ui.primitives, &screen);
             }
         }
+        #[cfg(target_os = "windows")]
+        if let Some(d3d12) = &mut self.d3d12 {
+            d3d12.before_submit(&self.queue);
+        }
         self.queue.submit(ui_commands.into_iter().chain([encoder.finish()]));
+        // A decoder's buffer stays reserved until the GPU has finished reading it.
+        if let Some(lease) = self.planes.as_ref().and_then(|p| p.lease.clone()) {
+            self.queue.on_submitted_work_done(move || drop(lease));
+            let _ = self.device.poll(wgpu::PollType::Poll);
+        }
         self.queue.present(frame);
         self.free_ui_textures(ui.as_ref());
     }
@@ -446,7 +498,36 @@ impl Renderer {
                 wgpu::BindGroupEntry { binding: 4, resource: self.params.as_entire_binding() },
             ],
         });
-        Planes { width, height, nv12, y, u, v, bind_group }
+        Planes { width, height, nv12, owned: true, y, u, v, bind_group, lease: None }
+    }
+
+    /// A decoder's NV12 texture, sampled through views of its luma and chroma planes.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    fn bind_imported_nv12(
+        &self,
+        width: u32,
+        height: u32,
+        texture: wgpu::Texture,
+        lease: Arc<dyn std::any::Any + Send + Sync>,
+    ) -> Planes {
+        let plane = |format, aspect| {
+            texture.create_view(&wgpu::TextureViewDescriptor { format: Some(format), aspect, ..Default::default() })
+        };
+        let vy = plane(wgpu::TextureFormat::R8Unorm, wgpu::TextureAspect::Plane0);
+        let vuv = plane(wgpu::TextureFormat::Rg8Unorm, wgpu::TextureAspect::Plane1);
+        let vv = self.placeholder.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("yuv (shared)"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&vy) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&vuv) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&vv) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                wgpu::BindGroupEntry { binding: 4, resource: self.params.as_entire_binding() },
+            ],
+        });
+        Planes { width, height, nv12: true, owned: false, y: texture.clone(), u: texture, v: None, bind_group, lease: Some(lease) }
     }
 
     fn write_plane(&self, texture: &wgpu::Texture, data: &[u8], stride: u32, width: u32, height: u32) {
@@ -469,4 +550,27 @@ pub fn letterbox_scale(video: (u32, u32), window: (u32, u32)) -> (f32, f32) {
     let va = video.0 as f32 / video.1 as f32;
     let wa = window.0 as f32 / window.1.max(1) as f32;
     if va > wa { (1.0, wa / va) } else { (va / wa, 1.0) }
+}
+
+/// The surface and GPU adapter to render with. On Windows, Direct3D 12 first: zero-copy
+/// display shares textures with the Direct3D-based decoder.
+fn pick_adapter(window: &Arc<Window>) -> Result<(wgpu::Surface<'static>, wgpu::Adapter)> {
+    let try_backends = |backends: wgpu::Backends| -> Result<(wgpu::Surface<'static>, wgpu::Adapter)> {
+        let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
+        desc.backends = backends;
+        let instance = wgpu::Instance::new(desc);
+        let surface = instance.create_surface(window.clone())?;
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: Some(&surface),
+            ..Default::default()
+        }))
+        .context("no usable GPU adapter")?;
+        Ok((surface, adapter))
+    };
+    #[cfg(target_os = "windows")]
+    if let Ok(found) = try_backends(wgpu::Backends::DX12) {
+        return Ok(found);
+    }
+    try_backends(wgpu::Backends::all())
 }

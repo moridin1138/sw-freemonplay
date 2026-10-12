@@ -273,6 +273,8 @@ pub struct Session {
     pub codecs: Vec<Codec>,
     pub store: Arc<Mutex<ClientStore>>,
     pub display: DisplayRequest,
+    /// The renderer's GPU (Windows: adapter LUID), for zero-copy decoding.
+    pub gpu_adapter: Option<u64>,
     pub outgoing: mpsc::UnboundedReceiver<ClientMsg>,
     pub outgoing_tx: mpsc::UnboundedSender<ClientMsg>,
     pub frames: Arc<FrameSlot>,
@@ -349,10 +351,10 @@ pub async fn run(mut s: Session) -> Result<String> {
     let (ready_tx, ready_rx) = oneshot::channel();
     {
         let (frames, proxy, tx) = (s.frames.clone(), s.proxy.clone(), s.outgoing_tx.clone());
-        let codec = welcome.codec;
+        let (codec, gpu_adapter) = (welcome.codec, s.gpu_adapter);
         std::thread::Builder::new()
             .name("decoder".into())
-            .spawn(move || decode::run(codec, frame_rx, frames, proxy, &tx, ready_tx))?;
+            .spawn(move || decode::run(codec, frame_rx, frames, proxy, &tx, ready_tx, gpu_adapter))?;
     }
     // Let video wait in the network buffer until the decoder can take it, rather than
     // discarding frames (and asking for keyframes) while it starts up. If it failed to

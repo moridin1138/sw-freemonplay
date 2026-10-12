@@ -21,7 +21,7 @@ mod annexb;
 #[cfg(target_os = "linux")]
 mod gstreamer;
 #[cfg(target_os = "windows")]
-mod mediafoundation;
+pub mod mediafoundation;
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 mod software;
 #[cfg(target_os = "macos")]
@@ -47,6 +47,9 @@ pub enum Planes {
     /// The decoder's own GPU-shareable NV12 buffer, drawn without copying (macOS).
     #[cfg(target_os = "macos")]
     Native(videotoolbox::PixelBuffer),
+    /// An NV12 texture on the GPU shared with the renderer, drawn without copying (Windows).
+    #[cfg(target_os = "windows")]
+    Shared(mediafoundation::SharedFrame),
 }
 
 /// Where decoders hand finished pictures. Some decoders call it from their own threads.
@@ -72,11 +75,15 @@ pub fn supported_codecs() -> Vec<Codec> {
     return vec![Codec::H264];
 }
 
-fn new_decoder(codec: Codec, deliver: Deliver) -> Result<Box<dyn Decoder>> {
+/// `gpu_adapter` identifies the GPU the renderer uses (Windows: its LUID), so a hardware
+/// decoder on the same GPU can hand frames over without copying.
+fn new_decoder(codec: Codec, deliver: Deliver, gpu_adapter: Option<u64>) -> Result<Box<dyn Decoder>> {
+    #[cfg(not(target_os = "windows"))]
+    let _ = gpu_adapter;
     #[cfg(target_os = "macos")]
     return Ok(Box::new(videotoolbox::VtDecoder::new(codec, deliver)));
     #[cfg(target_os = "windows")]
-    return Ok(Box::new(mediafoundation::MfDecoder::new(codec, deliver)?));
+    return Ok(Box::new(mediafoundation::MfDecoder::new(codec, deliver, gpu_adapter)?));
     #[cfg(target_os = "linux")]
     return match gstreamer::GstDecoder::new(codec, deliver.clone()) {
         Ok(d) => Ok(Box::new(d) as Box<dyn Decoder>),
@@ -117,6 +124,7 @@ pub fn run(
     proxy: EventLoopProxy<UserEvent>,
     outgoing: &UnboundedSender<ClientMsg>,
     ready: tokio::sync::oneshot::Sender<()>,
+    gpu_adapter: Option<u64>,
 ) {
     // Arrival times of frames in the decoder, matched to pictures by timestamp.
     let arrivals: Arc<Mutex<VecDeque<(u64, Instant)>>> = Arc::default();
@@ -137,7 +145,7 @@ pub fn run(
             }
         })
     };
-    let mut decoder = match new_decoder(codec, deliver) {
+    let mut decoder = match new_decoder(codec, deliver, gpu_adapter) {
         Ok(d) => d,
         Err(e) => {
             let _ = proxy.send_event(UserEvent::Closed(format!("can't start {codec} decoder: {e:#}")));
