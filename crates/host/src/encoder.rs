@@ -23,6 +23,11 @@ pub trait VideoEncoder: Send {
     fn name(&self) -> &'static str;
     /// Returns `None` if the encoder chose to drop this frame.
     fn encode(&mut self, frame: &Frame, force_keyframe: bool) -> Result<Option<Encoded>>;
+    /// Changes the target bitrate mid-stream (adaptive bitrate). Encoders that can't just
+    /// keep their original rate.
+    fn set_bitrate(&mut self, _bps: u32) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]

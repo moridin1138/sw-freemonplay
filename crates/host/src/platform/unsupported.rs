@@ -69,3 +69,12 @@ impl Injector {
     }
     pub fn inject(&mut self, _event: &InputEvent) {}
 }
+
+pub mod network {
+    use fmp_proto::NetworkInfo;
+
+    /// This computer's Wi-Fi link (not inspected on this OS yet).
+    pub fn describe() -> Option<NetworkInfo> {
+        None
+    }
+}

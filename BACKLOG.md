@@ -9,7 +9,10 @@ Roughly in priority order. Done items move to [CHANGELOG.md](CHANGELOG.md).
 
 ## Next
 
-- **Better behaviour on Wi-Fi.** The network is most of the latency: a Surface on home Wi-Fi measured a 74 ms round trip (37 of about 54 ms in total). Ideas: detect and suggest turning off Wi-Fi power saving; adaptive bitrate from loss and round-trip feedback; stop one lost packet holding up later frames (per-frame streams, or datagrams with keyframe recovery).
+- **Wi-Fi, part 2.** Done: adaptive bitrate, capped send queue, Windows media streaming mode, link diagnostics on both ends. Still to do:
+  - Stop one lost packet holding up later frames (QUIC retransmits in order on one stream). Options: forward error correction, or per-frame streams with reference frame invalidation so a late frame can be skipped without a keyframe.
+  - Link diagnostics on Mac clients (CoreWLAN) and Linux clients (NetworkManager or `/proc/net/wireless`).
+  - Check the adaptive bitrate's thresholds on a busy network (the 2.4 GHz Mac is a good test case).
 - **Zero copy on Linux clients** (VAAPI surfaces as DMA-BUFs into wgpu's Vulkan backend).
 
 ## Later

@@ -6,9 +6,19 @@ publishes it as the release notes.
 
 ## [Unreleased]
 
-Hosts and clients must both be updated: the protocol changed (version 5).
+Hosts and clients must both be updated: the protocol changed (version 6).
 
 ### Added
+- **Adaptive bitrate.** The host lowers the bitrate when the network can't keep up (sends
+  stalling, or packet loss) and raises it again once things are calm, instead of letting
+  video queue up. The menu shows the current bitrate and packet loss per screen.
+- **Less queueing on slow links.** The host caps how much video may wait to be sent at
+  about one round trip's worth, so a slow link skips frames instead of falling behind.
+- **Wi-Fi tuning on Windows clients:** "media streaming mode" is switched on while
+  connected, so the adapter doesn't doze between access point beacons.
+- **Network diagnostics in the menu:** each screen's link (Wi-Fi standard, band, signal,
+  link rate, or wired; Windows clients for now) and this Mac's own Wi-Fi, with tips such
+  as "on 2.4 GHz" or "AWDL is active". `--self-test` reports the client's link too.
 - **Several monitors on one client.** Tick "Also use these monitors" (or pass
   `--all-monitors`) and each of the client's monitors becomes its own screen on the host,
   remembered separately by macOS. The main window's screen keeps its identity, so existing

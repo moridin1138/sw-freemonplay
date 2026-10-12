@@ -1,5 +1,6 @@
 //! One connected client: authenticate, create its virtual display, stream it, apply its input.
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -16,6 +17,7 @@ use crate::encoder::{CodecChoice, EncoderChoice, VideoEncoder, default_bitrate, 
 use crate::frame::{FrameSlot, Next};
 use crate::pattern::Pattern;
 use crate::platform::{Capture, Injector, VirtualDisplay};
+use crate::rate::{self, RateControl};
 use crate::registry::{Registry, SessionGuard, SessionInfo};
 use crate::settings::Settings;
 use crate::store::HostStore;
@@ -179,6 +181,12 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     if issued_token.is_some() {
         tracing::info!("paired with {who}");
     }
+    if let Some(network) = crate::platform::network::describe() {
+        tracing::info!("this Mac's network: {}", network.summary);
+        for tip in &network.advice {
+            tracing::info!("network tip: {tip}");
+        }
+    }
 
     let req = sanitize(hello.display);
     let settings = ctx.settings();
@@ -250,6 +258,10 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
             mbps: 0.0,
             host_ms: 0.0,
             rtt_ms: 0.0,
+            target_mbps: bitrate as f32 / 1e6,
+            max_mbps: bitrate as f32 / 1e6,
+            loss_pct: 0.0,
+            network: None,
             client: None,
         },
         conn.clone(),
@@ -257,23 +269,50 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
 
     // Frames travel with their capture time, to measure capture-to-sent latency.
     let (tx, mut rx) = mpsc::channel::<(VideoFrame, Instant)>(2);
+    // The sender lowers this when the network can't keep up; the encoder applies it.
+    let target_bitrate = Arc::new(AtomicU32::new(bitrate));
     let encoder = {
-        let slot = slot.clone();
-        std::thread::Builder::new().name("encoder".into()).spawn(move || encode_loop(&slot, encoder, tx))?
+        let (slot, target) = (slot.clone(), target_bitrate.clone());
+        std::thread::Builder::new().name("encoder".into()).spawn(move || encode_loop(&slot, encoder, tx, &target))?
     };
 
     let sender = async {
         let mut stats = Stats::new();
         let started = Instant::now();
         let mut first = true;
+        let mut rate = RateControl::new(bitrate, Instant::now());
+        conn.set_send_window(rate::send_window(bitrate, conn.rtt()));
+        let (mut tick, mut stalled) = (Instant::now(), Duration::ZERO);
         while let Some((frame, captured_at)) = rx.recv().await {
             if std::mem::take(&mut first) {
                 tracing::info!("{who}: first frame sent after {} ms", started.elapsed().as_millis());
             }
-            let bytes = frame.data.len();
+            let (bytes, keyframe) = (frame.data.len(), frame.keyframe);
+            let write_started = Instant::now();
             write_msg(&mut video, &frame).await?;
+            if !keyframe {
+                stalled += write_started.elapsed();
+            }
             stats.add(bytes, captured_at.elapsed());
             stats.maybe_report(&who, &session, conn.rtt());
+
+            if tick.elapsed() >= rate::TICK {
+                let path = conn.stats().path;
+                let sample = rate::Sample {
+                    elapsed: tick.elapsed(),
+                    stalled,
+                    sent_packets: path.sent_packets,
+                    lost_packets: path.lost_packets,
+                };
+                if let Some(bps) = rate.update(Instant::now(), &sample) {
+                    tracing::info!("{who}: bitrate {:.1} Mbit/s (network {})", bps as f64 / 1e6,
+                        if bps < target_bitrate.load(Ordering::Relaxed) { "behind" } else { "keeping up" });
+                    target_bitrate.store(bps, Ordering::Relaxed);
+                }
+                conn.set_send_window(rate::send_window(rate.current(), path.rtt));
+                session.update_rate(rate.current(), rate.max(), rate.loss());
+                (tick, stalled) = (Instant::now(), Duration::ZERO);
+            }
         }
         anyhow::Ok(())
     };
@@ -283,6 +322,10 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
                 None => return anyhow::Ok(()),
                 Some(ClientMsg::Input(event)) if ctx.settings().allow_input => source.inject(&event),
                 Some(ClientMsg::RequestKeyframe) => slot.request_keyframe(),
+                Some(ClientMsg::Network(network)) => {
+                    tracing::info!("{who}: network: {}", network.summary);
+                    session.update_network(network);
+                }
                 Some(ClientMsg::Stats(stats)) => {
                     session.update_client(stats);
                     tracing::debug!("{who}: screen reports {stats:?}");
@@ -414,15 +457,24 @@ fn encode_loop(
     slot: &FrameSlot,
     mut encoder: Box<dyn VideoEncoder>,
     tx: mpsc::Sender<(VideoFrame, Instant)>,
+    target_bitrate: &AtomicU32,
 ) -> Result<()> {
     crate::platform::prioritize_current_thread();
     let start = Instant::now();
     let mut need_keyframe = true;
+    let mut bitrate = target_bitrate.load(Ordering::Relaxed);
     loop {
         let (frame, keyframe) = match slot.next() {
             Next::Closed => return Ok(()),
             Next::Frame { frame, keyframe } => (frame, keyframe),
         };
+        let wanted = target_bitrate.load(Ordering::Relaxed);
+        if wanted != bitrate {
+            if let Err(e) = encoder.set_bitrate(wanted) {
+                tracing::warn!("couldn't change the bitrate: {e:#}");
+            }
+            bitrate = wanted;
+        }
         let Some(out) = encoder.encode(&frame, keyframe || need_keyframe)? else { continue };
         need_keyframe = false;
         let captured_at = frame.captured_at();
@@ -468,7 +520,7 @@ impl Stats {
         let rtt_ms = (rtt.as_secs_f64() * 1e3) as f32;
         session.update_stats(fps, mbps, host_ms, rtt_ms);
         self.windows += 1;
-        if self.windows % 5 == 0 {
+        if self.windows.is_multiple_of(5) {
             tracing::info!("{who}: {fps:.0} fps, {mbps:.1} Mbit/s, host {host_ms:.1} ms, round trip {rtt_ms:.1} ms");
         }
         *self = Self { windows: self.windows, ..Self::new() };

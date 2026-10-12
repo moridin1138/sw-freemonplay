@@ -11,6 +11,7 @@ mod app;
 mod awake;
 mod decode;
 mod input;
+mod link;
 mod net;
 mod render;
 #[cfg(target_os = "windows")]

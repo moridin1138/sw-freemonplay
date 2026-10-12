@@ -138,19 +138,15 @@ impl VtEncoder {
                 }
             }
         };
-        let bytes_per_sec = bitrate as f64 / 8.0;
-        // Allow short bursts (a keyframe after a big screen change) up to 2x the average.
-        let limits = CFArray::<CFNumber>::from_retained_objects(&[
-            CFNumber::new_f64(bytes_per_sec * 2.0),
-            CFNumber::new_f64(1.0),
-        ]);
         // SAFETY: framework constants, valid for the life of the process.
         unsafe {
             set(kVTCompressionPropertyKey_RealTime, yes, true)?;
             set(kVTCompressionPropertyKey_AllowFrameReordering, CFBoolean::new(false), true)?;
             set(kVTCompressionPropertyKey_ProfileLevel, profile, true)?;
-            set(kVTCompressionPropertyKey_AverageBitRate, &CFNumber::new_i32(bitrate as i32), true)?;
-            set(kVTCompressionPropertyKey_DataRateLimits, &limits, false)?;
+        }
+        apply_bitrate(&session, bitrate)?;
+        // SAFETY: as above.
+        unsafe {
             set(kVTCompressionPropertyKey_ExpectedFrameRate, &CFNumber::new_i32(fps as i32), false)?;
             // Periodic IDR so a client recovers on its own even if a keyframe request is lost.
             set(kVTCompressionPropertyKey_MaxKeyFrameInterval, &CFNumber::new_i32((fps * 10) as i32), false)?;
@@ -194,7 +190,30 @@ impl VtEncoder {
     }
 }
 
+/// Sets the average bitrate, allowing short bursts (a keyframe after a big screen change)
+/// up to 2x. Works mid-stream too.
+fn apply_bitrate(session: &VTCompressionSession, bitrate: u32) -> Result<()> {
+    let limits = CFArray::<CFNumber>::from_retained_objects(&[
+        CFNumber::new_f64(bitrate as f64 / 8.0 * 2.0),
+        CFNumber::new_f64(1.0),
+    ]);
+    // SAFETY: documented properties on our session; framework constants.
+    unsafe {
+        let status = VTSessionSetProperty(session, kVTCompressionPropertyKey_AverageBitRate, Some(&CFNumber::new_i32(bitrate as i32)));
+        if status != 0 {
+            bail!("setting the bitrate failed ({status})");
+        }
+        // Optional: some encoders ignore it.
+        let _ = VTSessionSetProperty(session, kVTCompressionPropertyKey_DataRateLimits, Some(&limits));
+    }
+    Ok(())
+}
+
 impl VideoEncoder for VtEncoder {
+    fn set_bitrate(&mut self, bps: u32) -> Result<()> {
+        apply_bitrate(&self.session, bps)
+    }
+
     fn name(&self) -> &'static str {
         match self.output.codec {
             Codec::H264 => "VideoToolbox H.264 (hardware)",

@@ -77,7 +77,7 @@ pub fn browse(changed: impl Fn() + Send + 'static) -> Result<HostList> {
                     (!addrs.is_empty()).then(|| Target { name: name.clone(), addrs, id: id.clone() })
                 })
                 .collect();
-            targets.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            targets.sort_by_key(|a| a.name.to_lowercase());
             *shared.lock().unwrap() = targets;
             changed();
         }

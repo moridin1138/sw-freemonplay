@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use fmp_proto::{ClientMsg, ClientStats, Codec, DisplayRequest, InputEvent, ScreenId, TouchPhase};
+use fmp_proto::{ClientMsg, ClientStats, Codec, DisplayRequest, InputEvent, NetworkInfo, ScreenId, TouchPhase};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use winit::application::ApplicationHandler;
@@ -23,6 +23,7 @@ use winit::window::{Fullscreen, Window, WindowId};
 use crate::awake::KeepAwake;
 use crate::decode::{self, FrameSlot};
 use crate::input;
+use crate::link::{self, LinkTuning};
 use crate::net::{self, Credentials, HostList, Prepared, Target};
 use crate::render::{Renderer, UiFrame};
 use crate::store::ClientStore;
@@ -35,6 +36,8 @@ const DEFAULT_WINDOWED: (u32, u32) = (1280, 800);
 const MAIN: usize = 0;
 
 /// Session events carry the display (`view`) they belong to.
+// Rare events, so the size of the largest variant doesn't matter.
+#[allow(clippy::large_enum_variant)]
 pub enum UserEvent {
     HostsChanged,
     /// A connect attempt finished (successfully or not). `code` is the code it used, if any.
@@ -151,6 +154,10 @@ pub struct App {
     hint_until: Option<Instant>,
     /// Keeps this screen on while connected (when the option is set).
     awake: Option<KeepAwake>,
+    /// Network link tuned for streaming while connected (Windows Wi-Fi), and its
+    /// description for the host.
+    link: Option<LinkTuning>,
+    network: Option<NetworkInfo>,
     pub exit_error: Option<String>,
 }
 
@@ -187,6 +194,8 @@ impl App {
             modifiers: ModifiersState::empty(),
             hint_until: None,
             awake: None,
+            link: None,
+            network: None,
             exit_error: None,
         }
     }
@@ -406,10 +415,19 @@ impl App {
     fn on_connected(&mut self, event_loop: &ActiveEventLoop, view: usize, host_name: String, width: u32, height: u32, codec: Codec) {
         let fullscreen = self.options.fullscreen;
         let windowed = self.startup.windowed.unwrap_or(DEFAULT_WINDOWED);
+        if view == MAIN
+            && let Some(host) = self.main().and_then(|d| d.live.as_ref()).map(|l| l.conn.remote_address().ip().to_canonical())
+        {
+            (self.link, self.network) = link::tune(host);
+        }
+        let network = self.network.clone();
         let Some(display) = self.displays.get_mut(&view) else { return };
         tracing::info!("display {view}: connected to {host_name}, receiving {width}x{height} {codec}");
         if let Some(live) = &mut display.live {
             live.connected = true;
+            if let Some(network) = network {
+                let _ = live.out.send(ClientMsg::Network(network));
+            }
         }
         display.video = Some((width, height));
         let w = &display.window;
@@ -539,6 +557,8 @@ impl App {
             }
         }
         self.awake = None;
+        self.link = None;
+        self.network = None;
         self.hint_until = None;
         self.target = None;
         // A failed first pairing goes back to the code dialog; anything else to the list.

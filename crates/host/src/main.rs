@@ -11,6 +11,7 @@ mod frame;
 mod menubar;
 mod pattern;
 mod platform;
+mod rate;
 mod registry;
 mod session;
 mod settings;

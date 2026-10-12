@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub mod hid;
 pub mod pairing;
 
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 pub const ALPN: &[u8] = b"freemonplay/1";
 pub const SERVICE_TYPE: &str = "_freemonplay._udp.local.";
 pub const DEFAULT_PORT: u16 = 47800;
@@ -33,6 +33,16 @@ pub enum ClientMsg {
     Stats(ClientStats),
     /// Pairing step 3: the client's proof (see [`pairing`]).
     PairingProof(Vec<u8>),
+    /// The client's network link, once known, for the host to show.
+    Network(NetworkInfo),
+}
+
+/// How the client reaches the host, described for people (e.g. "Wi-Fi 6, 5 GHz or higher,
+/// signal 80%, link 866 Mbit/s"), with tips when the link is likely to limit streaming.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NetworkInfo {
+    pub summary: String,
+    pub advice: Vec<String>,
 }
 
 /// What the client measured over the last reporting window, on its own clock.

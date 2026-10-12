@@ -1,6 +1,7 @@
 mod capture;
 mod cg;
 mod input;
+pub mod network;
 mod videotoolbox;
 mod virtual_display;
 

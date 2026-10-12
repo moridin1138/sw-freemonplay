@@ -53,9 +53,9 @@ impl I420Frame {
         let mut out_u = Vec::with_capacity(cw * ch);
         let mut out_v = Vec::with_capacity(cw * ch);
         for row in uv.chunks(uv_stride).take(ch) {
-            for pair in row[..cw * 2].chunks_exact(2) {
-                out_u.push(pair[0]);
-                out_v.push(pair[1]);
+            for [u, v] in row[..cw * 2].as_chunks::<2>().0 {
+                out_u.push(*u);
+                out_v.push(*v);
             }
         }
         Self { width, height, y: out_y, u: out_u, v: out_v, captured_at: Instant::now() }

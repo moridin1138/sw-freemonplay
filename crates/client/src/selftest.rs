@@ -42,6 +42,21 @@ pub fn run() -> Result<()> {
             }
         }
     }
+    // The link to the internet's default route (nothing is sent), as a stand-in for the
+    // link to a host: usually the same Wi-Fi or cable.
+    match crate::link::tune(std::net::Ipv4Addr::new(8, 8, 8, 8).into()) {
+        (tuning, Some(info)) => {
+            println!("Network: {}", info.summary);
+            for tip in &info.advice {
+                println!("  Tip: {tip}");
+            }
+            if tuning.is_none() && info.summary.starts_with("Wi-Fi") {
+                println!("  (couldn't switch on low-latency mode)");
+            }
+            println!();
+        }
+        (_, None) => println!("Network: not inspected on this OS yet\n"),
+    }
     if failures > 0 {
         bail!("{failures} of 2 passes failed");
     }

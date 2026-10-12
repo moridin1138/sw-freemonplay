@@ -28,12 +28,14 @@ crates/
   proto/    fmp-proto: wire protocol shared by both sides (messages, framing, pairing)
   host/     freemonplay-host: mDNS advert, QUIC server, sessions, menu bar app
     session.rs        one connection: handshake, pairing, display, encode loop, input
+    rate.rs           adaptive bitrate and the send window
     registry.rs       live sessions, for the menu bar (stats, Disconnect)
     store.rs          host id, pairing code, paired clients (token hashes)
     encoder.rs        codec negotiation; OpenH264 software fallback
     frame.rs          FrameSlot: newest-frame-wins handoff from capture to encoder
     menubar.rs        the macOS menu bar app (objc2-app-kit)
-    platform/macos/   virtual_display.rs, capture.rs, videotoolbox.rs, input.rs
+    platform/macos/   virtual_display.rs, capture.rs, videotoolbox.rs, input.rs,
+                      network.rs (this Mac's Wi-Fi, via CoreWLAN)
     platform/unsupported.rs   stubs (and the plan) for Windows and Linux hosts
   client/   freemonplay-client: discovery, sessions, decoding, rendering, input, GUI
     app.rs            the app state machine and its windows ("displays")
@@ -45,6 +47,7 @@ crates/
     render_metal.rs   macOS zero copy: decoder buffers as Metal textures
     render_d3d12.rs   Windows zero copy: shared D3D textures in wgpu's D3D12 device
     awake.rs          keep the screen on while connected
+    link.rs           the network link: Wi-Fi tuning and description (Windows)
     input.rs          winit input to protocol events (HID usages, normalised coords)
     selftest.rs       --self-test: decode and draw a built-in clip without a window
     store.rs          client id, paired hosts (token, pinned certificate fingerprint)
@@ -57,8 +60,8 @@ QUIC (`quinn`, TLS via `rustls` with a self-signed host certificate). Messages a
 
 Per connection:
 - **Control stream** (bidirectional, opened by the client): `Hello`, then pairing messages
-  if needed, then `Welcome` or `Rejected`. After that the client sends `Input`, `Stats`
-  and `RequestKeyframe`; the host sends `Notice`s.
+  if needed, then `Welcome` or `Rejected`. After that the client sends `Input`, `Stats`,
+  `RequestKeyframe` and `Network` (its link, once known); the host sends `Notice`s.
 - **Video stream** (unidirectional, host to client): `VideoFrame`s, each one access unit in
   Annex-B form with its capture timestamp and a keyframe flag.
 
@@ -106,6 +109,27 @@ Latency beats completeness everywhere:
   and asks the host for one.
 - The client draws as soon as a frame is decoded (`UserEvent::Frame`), not on the next
   redraw tick.
+
+## Adapting to the network
+
+`host/src/rate.rs`. Every 500 ms the sender feeds a `RateControl` with how long writes to
+QUIC stalled (keyframes excluded: they're big by design) and quinn's sent and lost packet
+counts. More than 20% of the time stalled, or more than 5% of packets lost, cuts the
+bitrate by 30% (at most once a second, down to an eighth of the maximum or 1.5 Mbit/s);
+3 s without trouble raises it by 10%, up to the negotiated maximum. The encoder thread
+applies changes between frames (`VideoEncoder::set_bitrate`; VideoToolbox supports it
+mid-stream, OpenH264 keeps its rate).
+
+Stalls only show up if QUIC can't buffer unlimited video, so the connection's send
+window is kept at about the current bitrate times (round trip + 60 ms), between 128 KB
+and 4 MB (`rate::send_window`). A link slower than the bitrate then stalls the sender
+within a frame or two, the encoder skips frames (newest wins) and the bitrate drops,
+instead of seconds of video queueing inside QUIC.
+
+Both ends describe their link for the menu: the client sends `ClientMsg::Network`
+(Windows: the interface that routes to the host, via the WLAN API, which also switches on
+media streaming mode for the session); the host reads its own Wi-Fi with CoreWLAN and
+checks whether AWDL is active.
 
 ## Zero copy
 

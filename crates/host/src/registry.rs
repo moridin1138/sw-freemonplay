@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use fmp_proto::{ClientStats, Codec};
+use fmp_proto::{ClientStats, Codec, NetworkInfo};
 
 use crate::platform::Activity;
 
@@ -24,6 +24,13 @@ pub struct SessionInfo {
     /// Capture to sent on this Mac (encode + queueing), ms.
     pub host_ms: f32,
     pub rtt_ms: f32,
+    /// Adaptive bitrate: the current target and the ceiling, Mbit/s.
+    pub target_mbps: f32,
+    pub max_mbps: f32,
+    /// Share of packets lost recently, percent.
+    pub loss_pct: f32,
+    /// The client's description of its network link, if it sent one.
+    pub network: Option<NetworkInfo>,
     /// Latest report from the client, once one has arrived.
     pub client: Option<ClientStats>,
 }
@@ -91,6 +98,18 @@ impl SessionGuard {
             info.host_ms = host_ms;
             info.rtt_ms = rtt_ms;
         });
+    }
+
+    pub fn update_rate(&self, target_bps: u32, max_bps: u32, loss: f64) {
+        self.update(|info| {
+            info.target_mbps = target_bps as f32 / 1e6;
+            info.max_mbps = max_bps as f32 / 1e6;
+            info.loss_pct = (loss * 100.0) as f32;
+        });
+    }
+
+    pub fn update_network(&self, network: NetworkInfo) {
+        self.update(|info| info.network = Some(network));
     }
 
     pub fn update_client(&self, stats: ClientStats) {

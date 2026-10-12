@@ -269,6 +269,11 @@ impl Controller {
         let sessions = ctx.registry.snapshot();
         if sessions.is_empty() {
             menu.addItem(&self.item("No screens connected", None, 0));
+        } else if let Some(network) = crate::platform::network::describe() {
+            menu.addItem(&self.item(&format!("This Mac's network: {}", network.summary), None, 0));
+            for tip in &network.advice {
+                menu.addItem(&self.item(&format!("    Tip: {tip}"), None, 0));
+            }
         }
         for s in sessions {
             let rate = if s.fps > 0.0 { format!(", {:.0} fps, {:.1} Mbit/s", s.fps, s.mbps) } else { String::new() };
@@ -278,6 +283,21 @@ impl Controller {
             details.setAutoenablesItems(false);
             details.addItem(&self.item(&format!("Address: {}", s.addr.ip().to_canonical()), None, 0));
             details.addItem(&self.item(&format!("Encoder: {}", s.encoder), None, 0));
+            let bitrate = if s.target_mbps < s.max_mbps - 0.05 {
+                format!("Bitrate: {:.1} of {:.0} Mbit/s (lowered: the network is behind)", s.target_mbps, s.max_mbps)
+            } else {
+                format!("Bitrate: up to {:.0} Mbit/s", s.max_mbps)
+            };
+            details.addItem(&self.item(&bitrate, None, 0));
+            if s.loss_pct >= 0.1 {
+                details.addItem(&self.item(&format!("Packets lost: {:.1}%", s.loss_pct), None, 0));
+            }
+            if let Some(network) = &s.network {
+                details.addItem(&self.item(&format!("Screen's network: {}", network.summary), None, 0));
+                for tip in &network.advice {
+                    details.addItem(&self.item(&format!("    Tip: {tip}"), None, 0));
+                }
+            }
             details.addItem(&NSMenuItem::separatorItem(self.mtm()));
             match (s.latency_ms(), s.client) {
                 (Some(total), Some(client)) => {
