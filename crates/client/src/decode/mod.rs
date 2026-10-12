@@ -52,6 +52,20 @@ pub enum Planes {
     Shared(mediafoundation::SharedFrame),
 }
 
+impl Planes {
+    /// How the picture reaches the renderer, for diagnostics.
+    pub fn describe(&self) -> &'static str {
+        match self {
+            Planes::I420 { .. } => "I420 in system memory",
+            Planes::Nv12 { .. } => "NV12 in system memory",
+            #[cfg(target_os = "macos")]
+            Planes::Native(_) => "VideoToolbox GPU buffer",
+            #[cfg(target_os = "windows")]
+            Planes::Shared(_) => "shared Direct3D texture",
+        }
+    }
+}
+
 /// Where decoders hand finished pictures. Some decoders call it from their own threads.
 pub type Deliver = Arc<dyn Fn(YuvFrame) + Send + Sync>;
 
@@ -77,7 +91,7 @@ pub fn supported_codecs() -> Vec<Codec> {
 
 /// `gpu_adapter` identifies the GPU the renderer uses (Windows: its LUID), so a hardware
 /// decoder on the same GPU can hand frames over without copying.
-fn new_decoder(codec: Codec, deliver: Deliver, gpu_adapter: Option<u64>) -> Result<Box<dyn Decoder>> {
+pub(crate) fn new_decoder(codec: Codec, deliver: Deliver, gpu_adapter: Option<u64>) -> Result<Box<dyn Decoder>> {
     #[cfg(not(target_os = "windows"))]
     let _ = gpu_adapter;
     #[cfg(target_os = "macos")]

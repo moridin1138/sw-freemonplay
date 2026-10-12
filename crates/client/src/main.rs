@@ -16,6 +16,7 @@ mod render;
 mod render_d3d12;
 #[cfg(target_os = "macos")]
 mod render_metal;
+mod selftest;
 mod store;
 mod ui;
 
@@ -65,6 +66,10 @@ struct Args {
     /// Where to keep this client's id and paired hosts.
     #[arg(long)]
     config_dir: Option<PathBuf>,
+    /// Check that this machine's video decoder and GPU display work (no window needed),
+    /// then exit.
+    #[arg(long)]
+    self_test: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -91,6 +96,9 @@ fn main() -> Result<()> {
         )
         .init();
     let args = Args::parse();
+    if args.self_test {
+        return selftest::run();
+    }
     let _ = rustls::crypto::ring::default_provider().install_default();
     let windowed = args.windowed.as_deref().map(parse_size).transpose()?;
 

@@ -99,7 +99,16 @@ struct Planes {
 }
 
 pub struct Renderer {
-    surface: wgpu::Surface<'static>,
+    /// The window's surface; `None` when rendering off screen (the self-test).
+    surface: Option<wgpu::Surface<'static>>,
+    /// The off-screen target when there's no window.
+    offscreen: Option<wgpu::Texture>,
+    // The importers hold the raw GPU device, so they're declared (and dropped) before the
+    // wgpu device: releasing it after wgpu has torn the device down crashes on Windows.
+    #[cfg(target_os = "macos")]
+    metal: Option<crate::render_metal::MetalImport>,
+    #[cfg(target_os = "windows")]
+    d3d12: Option<crate::render_d3d12::D3d12Import>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -112,29 +121,15 @@ pub struct Renderer {
     /// Bound in the unused V slot for NV12 (the shader ignores it).
     placeholder: wgpu::Texture,
     egui: egui_wgpu::Renderer,
-    #[cfg(target_os = "macos")]
-    metal: Option<crate::render_metal::MetalImport>,
-    #[cfg(target_os = "windows")]
-    d3d12: Option<crate::render_d3d12::D3d12Import>,
 }
 
 impl Renderer {
     /// `vsync: false` presents immediately instead of at the next display refresh: up to one
     /// refresh less latency, but the picture can tear (most visibly in full screen).
     pub fn new(window: Arc<Window>, vsync: bool) -> Result<Self> {
-        let (surface, adapter) = pick_adapter(&window)?;
-        // Zero copy on Windows imports the decoder's NV12 textures.
-        #[cfg(target_os = "windows")]
-        let required_features = adapter.features() & wgpu::Features::TEXTURE_FORMAT_NV12;
-        #[cfg(not(target_os = "windows"))]
-        let required_features = wgpu::Features::empty();
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("freemonplay"),
-            required_features,
-            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
-            ..Default::default()
-        }))?;
-        tracing::info!("rendering with {:?} on {}", adapter.get_info().backend, adapter.get_info().name);
+        let (surface, adapter) = pick_adapter(Some(&window))?;
+        let surface = surface.context("no window surface")?;
+        let (device, queue) = request_device(&adapter)?;
 
         let caps = surface.get_capabilities(&adapter);
         // Video is already gamma encoded, so prefer a non-sRGB surface and write it as is.
@@ -162,7 +157,50 @@ impl Renderer {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
+        Self::build(adapter, device, queue, config, Some(surface), None)
+    }
 
+    /// Renders into an off-screen image instead of a window (used by `--self-test`).
+    pub fn new_headless(width: u32, height: u32) -> Result<Self> {
+        let (_, adapter) = pick_adapter(None)?;
+        let (device, queue) = request_device(&adapter)?;
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let offscreen = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("off-screen target"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            color_space: Default::default(),
+            width,
+            height,
+            present_mode: wgpu::PresentMode::Fifo,
+            desired_maximum_frame_latency: 1,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![],
+        };
+        Self::build(adapter, device, queue, config, None, Some(offscreen))
+    }
+
+    fn build(
+        adapter: wgpu::Adapter,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        config: wgpu::SurfaceConfiguration,
+        surface: Option<wgpu::Surface<'static>>,
+        offscreen: Option<wgpu::Texture>,
+    ) -> Result<Self> {
+        let format = config.format;
+        // Only Windows' zero-copy import needs the adapter.
+        #[cfg(not(target_os = "windows"))]
+        let _ = &adapter;
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("yuv"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
@@ -258,6 +296,7 @@ impl Renderer {
 
         Ok(Self {
             surface,
+            offscreen,
             device,
             queue,
             config,
@@ -282,7 +321,9 @@ impl Renderer {
         }
         self.config.width = width;
         self.config.height = height;
-        self.surface.configure(&self.device, &self.config);
+        if let Some(surface) = &self.surface {
+            surface.configure(&self.device, &self.config);
+        }
     }
 
     pub fn upload(&mut self, frame: &YuvFrame) {
@@ -313,7 +354,9 @@ impl Renderer {
             if let Some(metal) = &self.metal {
                 match metal.import(&self.device, buffer) {
                     Ok((y, uv)) => {
-                        self.planes = Some(self.bind_planes(frame.width, frame.height, true, y, uv, None));
+                        // Borrowed from the decoder: never write copied frames into these.
+                        let planes = Planes { owned: false, ..self.bind_planes(frame.width, frame.height, true, y, uv, None) };
+                        self.planes = Some(planes);
                         return;
                     }
                     Err(e) => {
@@ -351,6 +394,11 @@ impl Renderer {
         }
     }
 
+    /// Whether the last uploaded frame is drawn straight from the decoder's memory.
+    pub fn drew_zero_copy(&self) -> bool {
+        self.planes.as_ref().is_some_and(|p| !p.owned)
+    }
+
     /// The GPU the renderer runs on, for a decoder to share frames with (Windows: the
     /// adapter LUID). `None` where zero copy doesn't need it or isn't available.
     pub fn gpu_adapter(&self) -> Option<u64> {
@@ -381,19 +429,26 @@ impl Renderer {
                 }
             }
         }
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                self.surface.configure(&self.device, &self.config);
-                self.free_ui_textures(ui.as_ref());
-                return;
-            }
-            _ => {
-                self.free_ui_textures(ui.as_ref());
-                return;
-            }
+        let frame = match &self.surface {
+            None => None,
+            Some(surface) => match surface.get_current_texture() {
+                wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => Some(f),
+                wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                    surface.configure(&self.device, &self.config);
+                    self.free_ui_textures(ui.as_ref());
+                    return;
+                }
+                _ => {
+                    self.free_ui_textures(ui.as_ref());
+                    return;
+                }
+            },
         };
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = match (&frame, &self.offscreen) {
+            (Some(f), _) => f.texture.create_view(&wgpu::TextureViewDescriptor::default()),
+            (None, Some(t)) => t.create_view(&wgpu::TextureViewDescriptor::default()),
+            (None, None) => return,
+        };
 
         if let Some(p) = &self.planes {
             let (sx, sy) = letterbox_scale((p.width, p.height), (self.config.width, self.config.height));
@@ -441,8 +496,42 @@ impl Renderer {
             self.queue.on_submitted_work_done(move || drop(lease));
             let _ = self.device.poll(wgpu::PollType::Poll);
         }
-        self.queue.present(frame);
+        if let Some(frame) = frame {
+            self.queue.present(frame);
+        }
         self.free_ui_textures(ui.as_ref());
+    }
+
+    /// The off-screen image as tightly packed RGBA rows (headless renderers only).
+    pub fn read_back(&self) -> Result<Vec<u8>> {
+        let texture = self.offscreen.as_ref().context("not an off-screen renderer")?;
+        let (w, h) = (self.config.width, self.config.height);
+        let padded = (w * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("read back"),
+            size: (padded * h) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("read back") });
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: Some(h) },
+            },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        self.queue.submit([encoder.finish()]);
+        let slice = buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        self.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| anyhow::anyhow!("GPU wait: {e:?}"))?;
+        let data = slice.get_mapped_range().map_err(|e| anyhow::anyhow!("mapping the read-back buffer: {e:?}"))?;
+        let mut out = Vec::with_capacity((w * h * 4) as usize);
+        for row in data.chunks(padded as usize).take(h as usize) {
+            out.extend_from_slice(&row[..(w * 4) as usize]);
+        }
+        Ok(out)
     }
 
     fn free_ui_textures(&mut self, ui: Option<&UiFrame>) {
@@ -554,15 +643,15 @@ pub fn letterbox_scale(video: (u32, u32), window: (u32, u32)) -> (f32, f32) {
 
 /// The surface and GPU adapter to render with. On Windows, Direct3D 12 first: zero-copy
 /// display shares textures with the Direct3D-based decoder.
-fn pick_adapter(window: &Arc<Window>) -> Result<(wgpu::Surface<'static>, wgpu::Adapter)> {
-    let try_backends = |backends: wgpu::Backends| -> Result<(wgpu::Surface<'static>, wgpu::Adapter)> {
+fn pick_adapter(window: Option<&Arc<Window>>) -> Result<(Option<wgpu::Surface<'static>>, wgpu::Adapter)> {
+    let try_backends = |backends: wgpu::Backends| -> Result<(Option<wgpu::Surface<'static>>, wgpu::Adapter)> {
         let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
         desc.backends = backends;
         let instance = wgpu::Instance::new(desc);
-        let surface = instance.create_surface(window.clone())?;
+        let surface = window.map(|w| instance.create_surface(w.clone())).transpose()?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: Some(&surface),
+            compatible_surface: surface.as_ref(),
             ..Default::default()
         }))
         .context("no usable GPU adapter")?;
@@ -573,4 +662,20 @@ fn pick_adapter(window: &Arc<Window>) -> Result<(wgpu::Surface<'static>, wgpu::A
         return Ok(found);
     }
     try_backends(wgpu::Backends::all())
+}
+
+fn request_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue)> {
+    // Zero copy on Windows imports the decoder's NV12 textures.
+    #[cfg(target_os = "windows")]
+    let required_features = adapter.features() & wgpu::Features::TEXTURE_FORMAT_NV12;
+    #[cfg(not(target_os = "windows"))]
+    let required_features = wgpu::Features::empty();
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("freemonplay"),
+        required_features,
+        required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+        ..Default::default()
+    }))?;
+    tracing::info!("rendering with {:?} on {}", adapter.get_info().backend, adapter.get_info().name);
+    Ok((device, queue))
 }
