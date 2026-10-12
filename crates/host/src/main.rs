@@ -5,6 +5,7 @@
 // capture helpers have no callers yet.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
+mod clipboard;
 mod encoder;
 mod frame;
 mod kvm;

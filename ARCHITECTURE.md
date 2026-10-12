@@ -29,6 +29,7 @@ crates/
   host/     freemonplay-host: mDNS advert, QUIC server, sessions, menu bar app
     session.rs        one connection: handshake, pairing, display, encode loop, input
     kvm.rs            keyboard and mouse mode: links, edge geometry, handing control over
+    clipboard.rs      clipboard sharing hub
     rate.rs           adaptive bitrate and the send window
     registry.rs       live sessions, for the menu bar (stats, Disconnect)
     store.rs          host id, pairing code, paired clients (token hashes)
@@ -37,7 +38,8 @@ crates/
     menubar.rs        the macOS menu bar app (objc2-app-kit)
     platform/macos/   virtual_display.rs, capture.rs, videotoolbox.rs, input.rs,
                       network.rs (this Mac's Wi-Fi, via CoreWLAN),
-                      kvm.rs (event tap: watch the pointer, capture and forward input)
+                      kvm.rs (event tap: watch the pointer, capture and forward input),
+                      clipboard.rs (the general pasteboard as text)
     platform/unsupported.rs   stubs (and the plan) for Windows and Linux hosts
   client/   freemonplay-client: discovery, sessions, decoding, rendering, input, GUI
     app.rs            the app state machine and its windows ("displays")
@@ -51,6 +53,7 @@ crates/
     awake.rs          keep the screen on while connected
     link.rs           the network link: Wi-Fi tuning and description (Windows)
     kvm.rs            keyboard and mouse mode: pointer tracking, return, Windows injection
+    clip.rs           clipboard sharing: poll, send, receive
     input.rs          winit input to protocol events (HID usages, normalised coords)
     selftest.rs       --self-test: decode and draw a built-in clip without a window
     store.rs          client id, paired hosts (token, pinned certificate fingerprint)
@@ -142,12 +145,24 @@ failed send or the session ending takes control back.
 **Client** (`kvm.rs`). Keeps its own pointer position, moves it by the host's deltas
 (scaled by each monitor's pixels per point) and places the cursor absolutely, so the
 client OS's pointer acceleration isn't applied twice. Moving onto the streamed monitor
-(mixed) or across the edge facing the host (beside) sends `ReturnControl`, preceded by its
-clipboard text if that changed; elsewhere the pointer slides along the outer edge. Held
+(mixed) or across the edge facing the host (beside) sends `ReturnControl`, preceded by any
+newly copied text; elsewhere the pointer slides along the outer edge. Held
 keys and buttons are released whenever control leaves. While the host has control, input
 arriving in the client's own windows is not forwarded (it would echo back). Windows
 injection uses `SendInput` (scancodes, absolute virtual-desktop moves); macOS and Linux
 clients can't be controlled yet.
+
+## Clipboard
+
+Text only, both ways, for clients that set `Hello::clipboard` (one session per client
+computer, so several monitors don't triple it). Each side polls its clipboard's change
+counter about once a second (Linux compares the text itself) and sends new text as
+`Clipboard`. The host's hub (`clipboard.rs`) remembers what each client has, so text never
+bounces back, and passes text from one client on to the others. Items marked private are
+skipped: macOS `org.nspasteboard.ConcealedType` and `TransientType`, Windows
+`ExcludeClipboardContentFromMonitorProcessing` (what password managers set). In keyboard
+and mouse mode the current text is also sent the moment control crosses, so a paste right
+away works.
 
 ## Adapting to the network
 
@@ -246,5 +261,8 @@ refresh aren't included, so the real figure is somewhat higher.
 - `freemonplay-client --self-test`: real decoder and renderer, off screen; checks
   colours, timestamps and which path ran (zero copy or copying). Works over SSH.
 - `freemonplay-host --test-pattern`: streams a generated picture, no permissions needed.
-- CI (`.github/workflows/ci.yml`) builds the Mac app and the clients for all three OSes;
-  `release.yml` publishes them for `v*` tags.
+- CI (`.github/workflows/ci.yml`) builds the Mac menu bar app, the Mac client app
+  (`bundle.sh --client`), the Windows client and its Inno Setup installer
+  (`build/windows/freemonplay.iss`; the icon is embedded by `crates/client/build.rs`), and
+  the Linux client; `release.yml` publishes them for `v*` tags, with that version's
+  changelog section as the notes.

@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use fmp_proto::{Edge, HostMsg, KvmLayout, Rect, RemoteInput, ReturnAt};
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::clipboard::Hub;
 use crate::platform::kvm as platform;
 
 /// A display's area in this computer's global coordinates (macOS: points, y down).
@@ -57,13 +58,12 @@ struct Active {
 struct State {
     links: Vec<Link>,
     active: Option<Active>,
-    /// Last clipboard text synced in either direction, so unchanged text isn't resent.
-    clipboard: Option<String>,
 }
 
-#[derive(Default)]
 pub struct Kvm {
     state: Mutex<State>,
+    /// So a paste works the moment the keyboard and mouse arrive.
+    clipboard: Arc<Hub>,
 }
 
 /// The pointer, as the platform layer saw it move.
@@ -77,8 +77,8 @@ pub struct Pointer {
 }
 
 impl Kvm {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self::default())
+    pub fn new(clipboard: Arc<Hub>) -> Arc<Self> {
+        Arc::new(Self { state: Mutex::default(), clipboard })
     }
 
     /// Offers a session's keyboard and mouse monitors. Starts watching the pointer if this is
@@ -146,19 +146,13 @@ impl Kvm {
         });
         let Some((i, (monitor, x, y, back))) = found else { return false };
 
-        let clipboard = platform::clipboard_text().filter(|t| state.clipboard.as_ref() != Some(t));
         let link = &state.links[i];
-        if let Some(text) = &clipboard {
-            let _ = link.out.send(HostMsg::Clipboard(text.clone()));
-        }
+        self.clipboard.sync_to(link.session);
         if link.out.send(HostMsg::RemoteEnter { monitor: monitor as u32, x, y, back }).is_err() {
             return false;
         }
         tracing::info!("keyboard and mouse now control {}", link.name);
         let (session, park) = (link.session, park_point(&p.bounds, p.x, p.y));
-        if clipboard.is_some() {
-            state.clipboard = clipboard;
-        }
         state.active = Some(Active { session, park });
         drop(state);
         platform::capture_cursor(park);
@@ -208,12 +202,6 @@ impl Kvm {
         });
         tracing::info!("keyboard and mouse back");
         platform::release_cursor(to.unwrap_or(park));
-    }
-
-    /// The client's clipboard, sent as control returns.
-    pub fn clipboard_from_client(&self, text: String) {
-        platform::set_clipboard(&text);
-        self.state.lock().unwrap().clipboard = Some(text);
     }
 }
 

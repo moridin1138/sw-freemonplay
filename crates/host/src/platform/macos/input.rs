@@ -49,7 +49,7 @@ impl Injector {
                 }
             }
             InputEvent::Key { usage, pressed } => {
-                let Some(code) = mac_keycode(usage) else { return };
+                let Some(code) = hid::mac_keycode(usage) else { return };
                 if let Some(flag) = modifier_flag(usage) {
                     if pressed { self.modifiers |= flag } else { self.modifiers &= !flag }
                 }
@@ -166,73 +166,3 @@ fn modifier_flag(usage: u16) -> Option<u64> {
     })
 }
 
-/// HID usage to macOS virtual key code (kVK_* from HIToolbox/Events.h).
-pub(super) fn mac_keycode(usage: u16) -> Option<u16> {
-    // a..z in HID order
-    const LETTERS: [u16; 26] = [
-        0x00, 0x0B, 0x08, 0x02, 0x0E, 0x03, 0x05, 0x04, 0x22, 0x26, 0x28, 0x25, 0x2E, 0x2D, 0x1F, 0x23, 0x0C, 0x0F,
-        0x01, 0x11, 0x20, 0x09, 0x0D, 0x07, 0x10, 0x06,
-    ];
-    // 1..9, 0
-    const DIGITS: [u16; 10] = [0x12, 0x13, 0x14, 0x15, 0x17, 0x16, 0x1A, 0x1C, 0x19, 0x1D];
-    // F1..F12
-    const FKEYS: [u16; 12] = [0x7A, 0x78, 0x63, 0x76, 0x60, 0x61, 0x62, 0x64, 0x65, 0x6D, 0x67, 0x6F];
-    // F13..F20 (macOS has no F21..F24)
-    const FKEYS_HIGH: [u16; 8] = [0x69, 0x6B, 0x71, 0x6A, 0x40, 0x4F, 0x50, 0x5A];
-    // keypad 1..9, 0
-    const NUMPAD: [u16; 10] = [0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5B, 0x5C, 0x52];
-
-    Some(match usage {
-        hid::A..=hid::Z => LETTERS[(usage - hid::A) as usize],
-        hid::DIGIT1..=hid::DIGIT0 => DIGITS[(usage - hid::DIGIT1) as usize],
-        hid::F1..=hid::F12 => FKEYS[(usage - hid::F1) as usize],
-        hid::F13..=hid::F24 => *FKEYS_HIGH.get((usage - hid::F13) as usize)?,
-        hid::NUMPAD1..=hid::NUMPAD0 => NUMPAD[(usage - hid::NUMPAD1) as usize],
-        hid::ENTER => 0x24,
-        hid::ESCAPE => 0x35,
-        hid::BACKSPACE => 0x33,
-        hid::TAB => 0x30,
-        hid::SPACE => 0x31,
-        hid::MINUS => 0x1B,
-        hid::EQUAL => 0x18,
-        hid::BRACKET_LEFT => 0x21,
-        hid::BRACKET_RIGHT => 0x1E,
-        hid::BACKSLASH => 0x2A,
-        hid::SEMICOLON => 0x29,
-        hid::QUOTE => 0x27,
-        hid::BACKQUOTE => 0x32,
-        hid::COMMA => 0x2B,
-        hid::PERIOD => 0x2F,
-        hid::SLASH => 0x2C,
-        hid::CAPS_LOCK => 0x39,
-        hid::INSERT => 0x72, // Help
-        hid::HOME => 0x73,
-        hid::PAGE_UP => 0x74,
-        hid::DELETE => 0x75,
-        hid::END => 0x77,
-        hid::PAGE_DOWN => 0x79,
-        hid::ARROW_RIGHT => 0x7C,
-        hid::ARROW_LEFT => 0x7B,
-        hid::ARROW_DOWN => 0x7D,
-        hid::ARROW_UP => 0x7E,
-        hid::NUM_LOCK => 0x47, // Clear
-        hid::NUMPAD_DIVIDE => 0x4B,
-        hid::NUMPAD_MULTIPLY => 0x43,
-        hid::NUMPAD_SUBTRACT => 0x4E,
-        hid::NUMPAD_ADD => 0x45,
-        hid::NUMPAD_ENTER => 0x4C,
-        hid::NUMPAD_DECIMAL => 0x41,
-        hid::NUMPAD_EQUAL => 0x51,
-        hid::INTL_BACKSLASH => 0x0A,
-        hid::CONTEXT_MENU => 0x6E,
-        hid::CONTROL_LEFT => 0x3B,
-        hid::SHIFT_LEFT => 0x38,
-        hid::ALT_LEFT => 0x3A,
-        hid::META_LEFT => 0x37,
-        hid::CONTROL_RIGHT => 0x3E,
-        hid::SHIFT_RIGHT => 0x3C,
-        hid::ALT_RIGHT => 0x3D,
-        hid::META_RIGHT => 0x36,
-        _ => return None,
-    })
-}

@@ -170,6 +170,13 @@ define_class!(
             self.ivars().ctx.update_settings(|s| s.max_fps = fps);
         }
 
+        #[unsafe(method(toggleClipboard:))]
+        fn toggle_clipboard(&self, _sender: &NSMenuItem) {
+            let ctx = &self.ivars().ctx;
+            ctx.update_settings(|s| s.share_clipboard = !s.share_clipboard);
+            ctx.clipboard.set_enabled(ctx.settings().share_clipboard);
+        }
+
         #[unsafe(method(toggleInput:))]
         fn toggle_input(&self, _sender: &NSMenuItem) {
             self.ivars().ctx.update_settings(|s| s.allow_input = !s.allow_input);
@@ -393,6 +400,13 @@ impl Controller {
         input.setEnabled(!ctx.overrides.no_input);
         input.setToolTip(Some(&NSString::from_str("Mouse, keyboard and touch on a screen control this Mac.")));
         menu.addItem(&input);
+        let clipboard = self.item("Share Clipboard with Screens", Some(sel!(toggleClipboard:)), 0);
+        clipboard.setState(if settings.share_clipboard { NSControlStateValueOn } else { NSControlStateValueOff });
+        clipboard.setToolTip(Some(&NSString::from_str(
+            "Text copied here can be pasted on the screens' computers, and the other way round. \
+             Passwords copied from password managers are never shared.",
+        )));
+        menu.addItem(&clipboard);
         menu.addItem(&self.item("Changes apply to screens that connect next.", None, 0));
         menu.addItem(&NSMenuItem::separatorItem(self.mtm()));
 

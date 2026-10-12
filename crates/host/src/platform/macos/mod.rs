@@ -1,4 +1,5 @@
 mod capture;
+pub mod clipboard;
 mod cg;
 mod input;
 pub mod kvm;

@@ -6,18 +6,32 @@ publishes it as the release notes.
 
 ## [Unreleased]
 
-Hosts and clients must both be updated: the protocol changed (version 8).
+## [0.2.0] - 2026-10-12
+
+Hosts and clients must both be updated: the protocol changed (version 9), and 0.1.0
+clients can't connect to a 0.2.0 host or the other way round.
 
 ### Added
-- **Keyboard and mouse mode** (a software KVM; Windows clients for now). Each of a
+- **Installers.** Windows screens get a setup program (per user, no administrator rights;
+  a newer one updates in place) and Macs used as screens get a "freemonplay Screen" app.
+  The Windows client has its own icon and no longer opens a console window when started
+  from the Start menu. The Linux download includes a desktop entry and icon.
+- **Shared clipboard.** Text copied on the Mac can be pasted on the screens' computers and
+  the other way round, in ordinary screen sessions as well as keyboard and mouse mode.
+  Passwords copied from password managers (marked concealed or transient on macOS, or
+  excluded from clipboard monitoring on Windows) are never shared. "Share Clipboard with
+  Screens" in the menu and "Share the clipboard with the host" on the client (or
+  `--no-clipboard`) turn it off.
+- **Keyboard and mouse mode** (a software KVM; Windows and Mac clients). Each of a
   client's monitors can be a *screen* for the Mac, *keyboard and mouse* (stays the
   client's own, but the Mac's keyboard and mouse can move onto it) or unused. Mixed
   example: a PC with three monitors lends one to the Mac as a screen and keeps two, which
   the Mac's pointer reaches by moving off that screen's edges, as on the desk. With no
   screen at all, the client's monitors sit beside the Mac's main display (side chosen in
-  the menu). Copied text follows control across. Ctrl+Alt+Shift+K on the Mac takes the
+  the menu). Ctrl+Alt+Shift+K on the Mac takes the
   keyboard and mouse back from anywhere. "Mac shortcuts" (on by default) makes Command
-  act as Ctrl. `--keyboard-mouse` uses all the client's monitors this way.
+  act as Ctrl. `--keyboard-mouse` uses all the client's monitors this way. Macs used as
+  screens can be controlled too (they need the Accessibility permission).
 - **Adaptive bitrate.** The host lowers the bitrate when the network can't keep up (sends
   stalling, or packet loss) and raises it again once things are calm, instead of letting
   video queue up. The menu shows the current bitrate and packet loss per screen.
@@ -79,5 +93,6 @@ First release.
 - App icon and menu bar icon; local signing identity so permissions survive rebuilds.
 - GPL-3.0-or-later license, CI for all three OSes, release builds for `v*` tags.
 
-[Unreleased]: https://github.com/moridin1138/sw-freemonplay/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/moridin1138/sw-freemonplay/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/moridin1138/sw-freemonplay/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/moridin1138/sw-freemonplay/releases/tag/v0.1.0

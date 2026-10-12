@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use fmp_proto::{
     ALPN, Auth, ClientMsg, Codec, DEFAULT_PORT, DisplayRequest, Hello, HostMsg, PROTOCOL_VERSION, RejectKind,
-    KvmLayout, SERVICE_TYPE, ScreenId, VideoFrame, pairing,
+    SERVICE_TYPE, ScreenId, VideoFrame, pairing,
     read_msg, write_msg,
 };
 use rustls::DigitallySignedStruct;
@@ -21,6 +21,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::decode::{self, FrameSlot};
 use crate::store::{self, ClientStore, hex};
+use crate::clip::ClipSync;
 use crate::{UserEvent, kvm};
 
 #[derive(Clone)]
@@ -310,11 +311,12 @@ pub struct Session {
     pub view: usize,
     /// Which monitor, when the client uses several (`None`: the main one).
     pub screen: Option<ScreenId>,
-    /// Keyboard and mouse mode: monitors the host's keyboard and mouse may move onto, with
-    /// each one's pixels per host point, and whether Command acts as Ctrl.
-    pub kvm: Option<(KvmLayout, Vec<f64>, bool)>,
+    /// Keyboard and mouse mode: monitors the host's keyboard and mouse may move onto.
+    pub kvm: Option<kvm::Setup>,
     /// No screen, only keyboard and mouse.
     pub input_only: bool,
+    /// Clipboard sharing, when on (one session per client does it).
+    pub clipboard: Option<Arc<ClipSync>>,
     /// Set while the host's keyboard and mouse are here.
     pub host_in_control: Arc<std::sync::atomic::AtomicBool>,
     pub connected: Connected,
@@ -353,8 +355,9 @@ pub async fn run(mut s: Session) -> Result<String> {
         display,
         codecs: s.codecs.clone(),
         screen: s.screen.clone(),
-        kvm: s.kvm.as_ref().map(|(layout, _, _)| layout.clone()),
+        kvm: s.kvm.as_ref().map(|k| k.layout.clone()),
         input_only: s.input_only,
+        clipboard: s.clipboard.is_some(),
     };
     write_msg(&mut send, &ClientMsg::Hello(hello)).await?;
 
@@ -457,14 +460,18 @@ pub async fn run(mut s: Session) -> Result<String> {
         }
         anyhow::Ok(())
     };
-    let mut remote =
-        s.kvm.take().map(|(layout, scales, swap)| kvm::Remote::new(layout, scales, swap, s.host_in_control.clone()));
+    let mut remote = s.kvm.take().map(|setup| kvm::Remote::new(setup, s.host_in_control.clone(), s.clipboard.clone()));
     let notices = async {
         while let Some(msg) = read_msg::<HostMsg>(&mut recv).await? {
             match msg {
                 HostMsg::Notice { message } => {
                     tracing::warn!("host says: {message}");
                     eprintln!("Host says: {message}");
+                }
+                HostMsg::Clipboard(text) => {
+                    if let Some(clipboard) = &s.clipboard {
+                        clipboard.received(text);
+                    }
                 }
                 msg => {
                     if let Some(remote) = &mut remote {
@@ -480,7 +487,19 @@ pub async fn run(mut s: Session) -> Result<String> {
         anyhow::Ok(())
     };
 
+    // Text copied here goes to the host.
+    let clipboard = async {
+        let Some(clipboard) = &s.clipboard else { return std::future::pending().await };
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            if let Some(text) = clipboard.copied() {
+                let _ = s.outgoing_tx.send(ClientMsg::Clipboard(text));
+            }
+        }
+    };
+
     tokio::select! {
+        () = clipboard => unreachable!("the clipboard loop never ends"),
         r = reader => r.map(|()| "host stopped streaming".to_string()),
         r = writer => r.map(|()| "closed".to_string()),
         r = notices => r.map(|()| "closed".to_string()),

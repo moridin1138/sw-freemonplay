@@ -24,6 +24,7 @@ use winit::monitor::MonitorHandle;
 use winit::window::{Fullscreen, Window, WindowId};
 
 use crate::awake::KeepAwake;
+use crate::clip::ClipSync;
 use crate::decode::{self, FrameSlot};
 use crate::input;
 use crate::link::{self, LinkTuning};
@@ -390,6 +391,8 @@ impl App {
             kvm,
             input_only,
             host_in_control: self.host_in_control.clone(),
+            // One session per computer shares the clipboard.
+            clipboard: (view == MAIN && self.options.share_clipboard).then(|| Arc::new(ClipSync::new())),
             connected,
             credentials,
             client_name: self.client_name.clone(),
@@ -419,7 +422,7 @@ impl App {
 
     /// Keyboard and mouse mode: the monitors set to it, with pixels per host point, plus
     /// the main monitor when it shows the host's screen (a mixed layout).
-    fn kvm_layout(&self) -> Option<(KvmLayout, Vec<f64>, bool)> {
+    fn kvm_layout(&self) -> Option<kvm::Setup> {
         let main = self.main()?.window.current_monitor()?;
         let mut monitors: Vec<MonitorHandle> =
             self.other_monitors().into_iter().filter(|m| self.options.role(&m.key) == Role::KeyboardMouse).map(|m| m.monitor).collect();
@@ -435,7 +438,8 @@ impl App {
         }
         let layout = KvmLayout { monitors: monitors.iter().map(rect_of).collect(), screen };
         let scales = monitors.iter().map(MonitorHandle::scale_factor).collect();
-        Some((layout, scales, self.options.swap_command_control))
+        let displays = monitors.iter().map(display_id).collect();
+        Some(kvm::Setup { layout, scales, displays, swap_command_control: self.options.swap_command_control })
     }
 
     /// The virtual display to ask for: the size of the display's monitor (or the windowed
@@ -922,6 +926,17 @@ impl ApplicationHandler<UserEvent> for App {
             Some(at) => event_loop.set_control_flow(ControlFlow::WaitUntil(at)),
             None => event_loop.set_control_flow(ControlFlow::Wait),
         }
+    }
+}
+
+/// The OS's id for a monitor (macOS display id), for placing input on it.
+fn display_id(m: &MonitorHandle) -> u32 {
+    #[cfg(target_os = "macos")]
+    return winit::platform::macos::MonitorHandleExtMacOS::native_id(m);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = m;
+        0
     }
 }
 

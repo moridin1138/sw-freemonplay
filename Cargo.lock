@@ -1247,7 +1247,7 @@ dependencies = [
 
 [[package]]
 name = "fmp-proto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "hmac",
@@ -1311,7 +1311,7 @@ dependencies = [
 
 [[package]]
 name = "freemonplay-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -1327,6 +1327,7 @@ dependencies = [
  "gstreamer-video",
  "mdns-sd",
  "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
  "objc2-core-media",
  "objc2-core-video",
@@ -1347,15 +1348,15 @@ dependencies = [
  "wgpu",
  "windows",
  "winit",
+ "winresource",
  "zbus",
 ]
 
 [[package]]
 name = "freemonplay-host"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
- "arboard",
  "block2 0.6.2",
  "clap",
  "directories",
@@ -5440,6 +5441,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "winresource"
+version = "0.1.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2bc6d36480b829272a5bdabf08e6dca8004761c1da7e35efef800540c66221b"
+dependencies = [
+ "toml",
+ "version_check",
 ]
 
 [[package]]

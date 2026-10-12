@@ -25,18 +25,13 @@ jobs:
         run: cargo test --workspace --locked
       - name: Build the menu bar app
         run: ./build/macos/bundle.sh --universal
-      - name: Build the client
-        run: |
-          cargo build --release --locked -p freemonplay-client --target aarch64-apple-darwin --target x86_64-apple-darwin
-          mkdir -p target/universal
-          lipo -create -output target/universal/freemonplay-client \
-            target/aarch64-apple-darwin/release/freemonplay-client target/x86_64-apple-darwin/release/freemonplay-client
+      - name: Build the client app
+        run: ./build/macos/bundle.sh --client --universal
       - name: Package
         run: |
-          mkdir -p dist client
+          mkdir -p dist
           ditto -c -k --keepParent target/freemonplay.app dist/freemonplay-macos.zip
-          cp target/universal/freemonplay-client LICENSE README.md client/
-          ditto -c -k client dist/freemonplay-client-macos.zip
+          ditto -c -k --keepParent "target/freemonplay Screen.app" dist/freemonplay-screen-macos.zip
       - uses: actions/upload-artifact@v4
         with:
           name: macos
@@ -57,7 +52,14 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist, client | Out-Null
           Copy-Item target/release/freemonplay-client.exe, LICENSE, README.md client/
-          Compress-Archive -Path client/* -DestinationPath dist/freemonplay-client-windows-x64.zip
+          Compress-Archive -Path client/* -DestinationPath dist/freemonplay-screen-windows-x64.zip
+      - name: Installer
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress | Out-Null
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp "/DVersion=$version" build\windows\freemonplay.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -83,9 +85,10 @@ jobs:
         run: cargo build --release --locked -p freemonplay-client
       - name: Package
         run: |
-          mkdir -p dist freemonplay-client
-          cp target/release/freemonplay-client LICENSE README.md freemonplay-client/
-          tar -czf dist/freemonplay-client-linux-x86_64.tar.gz freemonplay-client
+          mkdir -p dist freemonplay-screen
+          cp target/release/freemonplay-client LICENSE README.md build/linux/freemonplay-screen.desktop freemonplay-screen/
+          cp build/macos/icon/icon-1024.png freemonplay-screen/freemonplay.png
+          tar -czf dist/freemonplay-screen-linux-x86_64.tar.gz freemonplay-screen
       - uses: actions/upload-artifact@v4
         with:
           name: linux

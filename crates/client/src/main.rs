@@ -9,6 +9,7 @@
 
 mod app;
 mod awake;
+mod clip;
 mod decode;
 mod input;
 mod kvm;
@@ -70,6 +71,9 @@ struct Args {
     /// Let this screen dim, lock or sleep while connected (by default it's kept awake).
     #[arg(long)]
     allow_sleep: bool,
+    /// Don't share clipboard text with the host.
+    #[arg(long)]
+    no_clipboard: bool,
     /// Name this screen shows up as on the host. Defaults to this computer's hostname.
     #[arg(long)]
     name: Option<String>,
@@ -106,6 +110,8 @@ fn main() -> Result<()> {
         )
         .init();
     let args = Args::parse();
+    #[cfg(target_os = "windows")]
+    hide_own_console();
     if args.self_test {
         return selftest::run();
     }
@@ -146,6 +152,7 @@ fn main() -> Result<()> {
             main_role: ui::Role::Screen,
             roles: Default::default(),
             swap_command_control: true,
+            share_clipboard: !args.no_clipboard,
         },
     );
     event_loop.run_app(&mut app)?;
@@ -153,6 +160,20 @@ fn main() -> Result<()> {
     match app.exit_error {
         Some(e) => bail!(e),
         None => Ok(()),
+    }
+}
+
+/// Started from Explorer or the Start menu, Windows gives this console program a console
+/// window of its own, which would sit behind the app showing log lines. Let it go. Started
+/// from a terminal, the console is shared and output still appears there.
+#[cfg(target_os = "windows")]
+fn hide_own_console() {
+    use windows::Win32::System::Console::{FreeConsole, GetConsoleProcessList};
+    let mut processes = [0u32; 2];
+    // SAFETY: fills at most two entries of our buffer.
+    if unsafe { GetConsoleProcessList(&mut processes) } == 1 {
+        // SAFETY: detaching from our own console.
+        let _ = unsafe { FreeConsole() };
     }
 }
 

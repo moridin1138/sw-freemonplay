@@ -90,16 +90,20 @@ The first run asks for two permissions (System Settings > Privacy & Security), f
 - **Screen & System Audio Recording**, so it can capture the virtual displays. Restart the app or terminal after granting it.
 - **Accessibility**, so clients can control the mouse and keyboard. Without it the screens are view-only.
 
-On each device that should become a screen:
+On each device that should become a screen, install the client from the [latest release](https://github.com/moridin1138/sw-freemonplay/releases/latest): the setup program on Windows (no administrator rights needed), **freemonplay Screen** on a Mac, or the Linux download. Or run a build directly:
 
 ```bash
 ./freemonplay-client
 ```
 
+To build the installers yourself: `./build/macos/bundle.sh --client` makes `target/freemonplay Screen.app`, and on Windows, [Inno Setup](https://jrsoftware.org/isinfo.php) compiles `build/windows/freemonplay.iss` (after a release build) into `dist/`.
+
 A window lists the computers running freemonplay on your network. Drag it to the monitor you want to use, click **Connect**, and enter the pairing code shown in the host's menu the first time (after that it reconnects without one). The screen fills that monitor; disconnecting brings the list back. Under **Monitors**, each of the device's monitors can be:
 - **Screen for the host:** another screen for the Mac (arrange them in its Display settings; they're remembered).
-- **Keyboard and mouse** (Windows clients for now): stays the device's own, but the Mac's keyboard and mouse can move onto it, like Universal Control. With a streamed screen too, the Mac's pointer reaches these monitors by leaving that screen toward them, matching the device's own monitor layout. With no screen, they sit beside the Mac's main display, on the side chosen in the host's menu. Copied text follows the keyboard and mouse across. **Ctrl+Alt+Shift+K** on the Mac takes them back from anywhere; "Mac shortcuts" makes Command act as Ctrl.
+- **Keyboard and mouse** (Windows and Mac clients; a Mac needs the Accessibility permission for it): stays the device's own, but the Mac's keyboard and mouse can move onto it, like Universal Control. With a streamed screen too, the Mac's pointer reaches these monitors by leaving that screen toward them, matching the device's own monitor layout. With no screen, they sit beside the Mac's main display, on the side chosen in the host's menu. **Ctrl+Alt+Shift+K** on the Mac takes them back from anywhere; "Mac shortcuts" makes Command act as Ctrl.
 - **Not used.**
+
+Copied text is shared both ways between the Mac and its screens (except passwords copied from password managers); turn it off with **Share Clipboard with Screens** in the Mac's menu or **Share the clipboard with the host** in the client's options.
  Hosts on other networks can be reached with **Connect by address**, and **Options** sets full screen, sharpness (1x/2x), codec, vsync and whether to keep the screen awake while connected (on by default).
 
 Useful options:
@@ -110,9 +114,10 @@ Useful options:
 | `client --windowed 1280x800` | Stream in a window instead of full screen |
 | `client --monitor 1` | Open the window on a different monitor |
 | `client --all-monitors` | Use all of this device's monitors, each as its own screen |
-| `client --keyboard-mouse` | No screens: the Mac's keyboard and mouse control all of this device's monitors (Windows) |
+| `client --keyboard-mouse` | No screens: the Mac's keyboard and mouse control all of this device's monitors (Windows, Mac) |
 | `client --self-test` | Check this machine's video decoder and GPU display path, then exit (no window needed) |
 | `client --scale 2` | Force Retina-style 2x rendering (`auto` uses it on high-density screens) |
+| `client --no-clipboard` | Don't share copied text with the host |
 | `client --allow-sleep` | Let the screen dim, lock or sleep while connected (by default it's kept awake) |
 | `client --no-vsync` | Show frames without waiting for the display refresh: up to one refresh (about 16 ms at 60 Hz) less latency, but can tear |
 | `host --max-fps 30 --bitrate-mbps 8` | Lower bandwidth |
@@ -140,7 +145,7 @@ One QUIC connection per screen: the host captures its virtual display, hardware 
 - **HEVC on Windows clients** needs Microsoft's "HEVC Video Extensions" (often preinstalled by PC makers). Without them, Windows clients use H.264.
 - **HEVC on Linux clients** is offered automatically only with a VAAPI HEVC decoder (`vah265dec`/`vaapih265dec`); `--codec h265` forces it in software via `avdec_h265`.
 - **Bitrate control with the software encoder is loose.** Frame skipping is off to avoid stutter, and OpenH264 can't cap bitrate strictly without it. That's fine on a LAN.
-- **Client app packaging.** The client is a single program with its own window, but not yet a Mac `.app`, Windows installer or Linux desktop entry.
+- **Linux packaging** is a tarball with a desktop entry; there's no AppImage or Flatpak yet.
 - **Windows and Linux hosts** aren't implemented yet (see `crates/host/src/platform/unsupported.rs` for the plan).
 - **Touch** maps to a single-finger mouse. Multi-touch gestures aren't forwarded.
 

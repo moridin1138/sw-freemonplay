@@ -70,6 +70,8 @@ pub struct Options {
     pub roles: HashMap<String, Role>,
     /// Keyboard and mouse mode: Command acts as Ctrl, so Mac shortcuts work.
     pub swap_command_control: bool,
+    /// Share clipboard text with the host both ways.
+    pub share_clipboard: bool,
 }
 
 impl Options {
@@ -227,7 +229,8 @@ fn hosts(
                 ui.end_row();
             }
         });
-        if options.any_keyboard_mouse() {
+        // A Mac controlling a Mac needs no swapping.
+        if options.any_keyboard_mouse() && !cfg!(target_os = "macos") {
             ui.checkbox(&mut options.swap_command_control, "Mac shortcuts: Command acts as Ctrl")
                 .on_hover_text("So Command+C copies here too. Ctrl then acts as the Windows key.");
         }
@@ -270,6 +273,8 @@ fn hosts(
                 ui.selectable_value(&mut options.codec, CodecArg::H265, "HEVC");
             });
         ui.checkbox(&mut options.keep_awake, "Keep this screen awake while connected");
+        ui.checkbox(&mut options.share_clipboard, "Share the clipboard with the host")
+            .on_hover_text("Text copied on either computer can be pasted on the other. Passwords copied from password managers stay put.");
         ui.checkbox(&mut options.vsync, "Wait for the display refresh (no tearing)")
             .on_hover_text("Turning this off saves up to one refresh of latency, but the picture can tear.");
     });

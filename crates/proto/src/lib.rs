@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub mod hid;
 pub mod pairing;
 
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 pub const ALPN: &[u8] = b"freemonplay/1";
 pub const SERVICE_TYPE: &str = "_freemonplay._udp.local.";
 pub const DEFAULT_PORT: u16 = 47800;
@@ -38,7 +38,7 @@ pub enum ClientMsg {
     /// Keyboard and mouse mode: the pointer left the client's monitors back toward the
     /// host, which takes its keyboard and mouse back.
     ReturnControl(ReturnAt),
-    /// The client's clipboard text, sent as control returns to the host when it changed.
+    /// Text the client's user copied (see [`Hello::clipboard`]).
     Clipboard(String),
 }
 
@@ -166,6 +166,9 @@ pub struct Hello {
     pub kvm: Option<KvmLayout>,
     /// No screen: only keyboard and mouse (and the clipboard). The host creates no display.
     pub input_only: bool,
+    /// Share clipboard text both ways on this connection. A client with several monitors
+    /// asks on one of its sessions only.
+    pub clipboard: bool,
 }
 
 /// One of a client's monitors, so the host gives each its own virtual display that the
@@ -263,7 +266,7 @@ pub enum HostMsg {
     Remote(RemoteInput),
     /// The host took its keyboard and mouse back (its escape shortcut, or it gave up).
     RemoteLeave,
-    /// The host's clipboard text, sent as control moves to the client when it changed.
+    /// Text copied on the host (see [`Hello::clipboard`]).
     Clipboard(String),
 }
 
@@ -409,6 +412,7 @@ mod tests {
             codecs: vec![Codec::H265, Codec::H264],
             kvm: None,
             input_only: false,
+            clipboard: true,
             screen: Some(ScreenId { key: "\\\\.\\DISPLAY2".into(), name: "DISPLAY2".into() }),
         });
         let bytes = encode(&hello).unwrap();

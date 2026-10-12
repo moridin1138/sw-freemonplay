@@ -21,11 +21,13 @@ pub struct Settings {
     /// Keyboard and mouse mode: which side of the main display each client's monitors sit
     /// on, by client id (default: right).
     pub kvm_sides: BTreeMap<String, Edge>,
+    /// Share clipboard text with screens that ask to.
+    pub share_clipboard: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { codec: CodecChoice::Auto, max_fps: 60, allow_input: true, kvm_sides: BTreeMap::new() }
+        Self { codec: CodecChoice::Auto, max_fps: 60, allow_input: true, kvm_sides: BTreeMap::new(), share_clipboard: true }
     }
 }
 

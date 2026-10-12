@@ -280,23 +280,13 @@ unsafe fn libc_dlsym(name: &std::ffi::CStr) -> *mut c_void {
     unsafe { dlsym(RTLD_DEFAULT, name.as_ptr()) }
 }
 
-pub fn clipboard_text() -> Option<String> {
-    arboard::Clipboard::new().ok()?.get_text().ok().filter(|t| !t.is_empty())
-}
-
-pub fn set_clipboard(text: &str) {
-    if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(text)) {
-        tracing::warn!("couldn't set the clipboard: {e}");
-    }
-}
-
 /// Mac virtual keycode to USB HID usage (the inverse of input.rs's table).
 fn hid_usage(code: u16) -> Option<u16> {
     static TABLE: OnceLock<[u16; 128]> = OnceLock::new();
     let table = TABLE.get_or_init(|| {
         let mut table = [0u16; 128];
         for usage in 0..=0xE7u16 {
-            if let Some(code) = super::input::mac_keycode(usage)
+            if let Some(code) = fmp_proto::hid::mac_keycode(usage)
                 && (code as usize) < table.len()
                 && table[code as usize] == 0
             {

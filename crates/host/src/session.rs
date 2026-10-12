@@ -18,6 +18,7 @@ use crate::frame::{FrameSlot, Next};
 use crate::pattern::Pattern;
 use crate::platform::{Capture, Injector, VirtualDisplay};
 use crate::rate::{self, RateControl};
+use crate::clipboard::Hub;
 use crate::kvm::{Anchor, Kvm};
 use crate::registry::{KvmRole, Registry, SessionGuard, SessionInfo};
 use crate::settings::Settings;
@@ -42,6 +43,7 @@ pub struct Ctx {
     pub test_pattern: bool,
     /// Keyboard and mouse mode, shared by all sessions.
     pub kvm: Arc<Kvm>,
+    pub clipboard: Arc<Hub>,
 }
 
 #[derive(Default)]
@@ -63,6 +65,7 @@ impl Ctx {
         test_pattern: bool,
     ) -> anyhow::Result<Self> {
         let settings = Settings::load(store.dir());
+        let clipboard = Hub::new(settings.share_clipboard);
         Ok(Self {
             port: endpoint.local_addr()?.port(),
             store,
@@ -75,7 +78,8 @@ impl Ctx {
             bitrate_bps,
             encoder,
             test_pattern,
-            kvm: Kvm::new(),
+            kvm: Kvm::new(clipboard.clone()),
+            clipboard,
         })
     }
 
@@ -292,6 +296,9 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     );
     // Messages to the client on the control stream (notices, keyboard and mouse mode).
     let (host_tx, mut host_rx) = mpsc::unbounded_channel::<HostMsg>();
+    if hello.clipboard {
+        ctx.clipboard.register(session.id(), host_tx.clone());
+    }
     if let (Some(layout), Source::Screen { display, .. }) = (hello.kvm.clone(), &source) {
         let anchor = Anchor::Screen { display: display.id() };
         ctx.kvm.register(session.id(), &screen_name, host_tx.clone(), layout, anchor);
@@ -356,7 +363,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
                 Some(ClientMsg::Input(event)) if ctx.settings().allow_input => source.inject(&event),
                 Some(ClientMsg::RequestKeyframe) => slot.request_keyframe(),
                 Some(ClientMsg::ReturnControl(at)) => ctx.kvm.return_control(session.id(), at),
-                Some(ClientMsg::Clipboard(text)) => ctx.kvm.clipboard_from_client(text),
+                Some(ClientMsg::Clipboard(text)) => ctx.clipboard.copied_on_client(session.id(), text),
                 Some(ClientMsg::Network(network)) => {
                     tracing::info!("{who}: network: {}", network.summary);
                     session.update_network(network);
@@ -408,6 +415,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         _ = conn.closed() => Ok(()),
     };
     ctx.kvm.unregister(session.id());
+    ctx.clipboard.unregister(session.id());
 
     slot.close();
     match encoder.join() {
@@ -477,6 +485,9 @@ async fn input_only(
     );
     let (host_tx, mut host_rx) = mpsc::unbounded_channel::<HostMsg>();
     let anchor = Anchor::Beside { display: crate::platform::kvm::main_display(), side };
+    if hello.clipboard {
+        ctx.clipboard.register(session.id(), host_tx.clone());
+    }
     ctx.kvm.register(session.id(), &name, host_tx, layout, anchor);
 
     let control = async {
@@ -484,7 +495,7 @@ async fn input_only(
             match read_msg::<ClientMsg>(&mut recv).await? {
                 None => return anyhow::Ok(()),
                 Some(ClientMsg::ReturnControl(at)) => ctx.kvm.return_control(session.id(), at),
-                Some(ClientMsg::Clipboard(text)) => ctx.kvm.clipboard_from_client(text),
+                Some(ClientMsg::Clipboard(text)) => ctx.clipboard.copied_on_client(session.id(), text),
                 Some(ClientMsg::Network(network)) => session.update_network(network),
                 Some(_) => {}
             }
@@ -502,6 +513,7 @@ async fn input_only(
         _ = conn.closed() => Ok(()),
     };
     ctx.kvm.unregister(session.id());
+    ctx.clipboard.unregister(session.id());
     result
 }
 

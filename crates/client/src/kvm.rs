@@ -12,9 +12,22 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use fmp_proto::{ClientMsg, Edge, HostMsg, KvmLayout, MouseButton, Rect, RemoteInput, ReturnAt, hid};
 
+use crate::clip::ClipSync;
+
 /// Whether this OS can be controlled yet.
 pub fn supported() -> bool {
     imp::SUPPORTED
+}
+
+/// Everything keyboard and mouse mode needs to know about this computer's monitors.
+pub struct Setup {
+    pub layout: KvmLayout,
+    /// Pixels per host point, for each of `layout.monitors`.
+    pub scales: Vec<f64>,
+    /// The OS's id for each of `layout.monitors` (macOS display ids; unused elsewhere).
+    pub displays: Vec<u32>,
+    /// Mac shortcuts: Command acts as Ctrl (Windows and Linux only).
+    pub swap_command_control: bool,
 }
 
 pub struct Remote {
@@ -26,8 +39,8 @@ pub struct Remote {
     active: Option<Active>,
     held_keys: HashSet<u16>,
     held_buttons: HashSet<u8>,
-    /// Last clipboard text synced either way.
-    clipboard: Option<String>,
+    /// Clipboard sharing, if on: the newest copied text goes back with control.
+    clipboard: Option<Arc<ClipSync>>,
     injector: imp::Injector,
     /// Shared with the app: while set, input in our own windows (which the injected input
     /// may land in) mustn't be forwarded back to the host.
@@ -41,16 +54,18 @@ struct Active {
 }
 
 impl Remote {
-    pub fn new(layout: KvmLayout, scales: Vec<f64>, swap_command_control: bool, in_control: Arc<AtomicBool>) -> Self {
+    pub fn new(setup: Setup, in_control: Arc<AtomicBool>, clipboard: Option<Arc<ClipSync>>) -> Self {
+        let injector = imp::Injector::new(&setup.layout.monitors, &setup.displays);
         Self {
-            layout,
-            scales,
-            swap_command_control,
+            layout: setup.layout,
+            scales: setup.scales,
+            // A Mac controlling a Mac needs no swapping.
+            swap_command_control: setup.swap_command_control && !cfg!(target_os = "macos"),
             active: None,
             held_keys: HashSet::new(),
             held_buttons: HashSet::new(),
-            clipboard: None,
-            injector: imp::Injector,
+            clipboard,
+            injector,
             in_control,
         }
     }
@@ -58,10 +73,6 @@ impl Remote {
     /// Handles a message from the host; returns any to send back.
     pub fn handle(&mut self, msg: &HostMsg) -> Vec<ClientMsg> {
         match *msg {
-            HostMsg::Clipboard(ref text) => {
-                imp::set_clipboard(text);
-                self.clipboard = Some(text.clone());
-            }
             HostMsg::RemoteEnter { monitor, x, y, back } => {
                 let Some(m) = self.layout.monitors.get(monitor as usize) else { return Vec::new() };
                 let (x, y) = (m.x as f64 + x as f64 * m.width as f64, m.y as f64 + y as f64 * m.height as f64);
@@ -143,8 +154,8 @@ impl Remote {
 
     fn give_back(&mut self, at: ReturnAt) -> Vec<ClientMsg> {
         let mut out = Vec::new();
-        if let Some(text) = imp::clipboard_text().filter(|t| self.clipboard.as_ref() != Some(t)) {
-            self.clipboard = Some(text.clone());
+        // So a paste on the host works right away, without waiting for the next poll.
+        if let Some(text) = self.clipboard.as_ref().and_then(|c| c.copied()) {
             out.push(ClientMsg::Clipboard(text));
         }
         out.push(ClientMsg::ReturnControl(at));
@@ -233,7 +244,11 @@ mod imp {
     pub struct Injector;
 
     impl Injector {
-        pub fn move_to(&self, x: f64, y: f64) {
+        pub fn new(_monitors: &[fmp_proto::Rect], _displays: &[u32]) -> Self {
+            Self
+        }
+
+        pub fn move_to(&mut self, x: f64, y: f64) {
             // SAFETY: plain system metric queries.
             let (vx, vy, vw, vh) = unsafe {
                 (
@@ -248,7 +263,7 @@ mod imp {
             mouse(nx, ny, 0, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK);
         }
 
-        pub fn button(&self, button: MouseButton, pressed: bool) {
+        pub fn button(&mut self, button: MouseButton, pressed: bool) {
             let (flags, data) = match (button, pressed) {
                 (MouseButton::Left, true) => (MOUSEEVENTF_LEFTDOWN, 0),
                 (MouseButton::Left, false) => (MOUSEEVENTF_LEFTUP, 0),
@@ -264,7 +279,7 @@ mod imp {
             mouse(0, 0, data, flags);
         }
 
-        pub fn scroll(&self, dx: f32, dy: f32, precise: bool) {
+        pub fn scroll(&mut self, dx: f32, dy: f32, precise: bool) {
             let per = if precise { WHEEL_PER_PIXEL } else { WHEEL_DELTA };
             // Host: positive dy scrolls up, positive dx scrolls left; Windows: positive
             // wheel scrolls up, positive horizontal wheel scrolls right.
@@ -277,8 +292,8 @@ mod imp {
             }
         }
 
-        pub fn key(&self, usage: u16, pressed: bool) {
-            let Some((scan, extended)) = scancode(usage) else { return };
+        pub fn key(&mut self, usage: u16, pressed: bool) {
+            let Some((scan, extended)) = hid::set1_scancode(usage) else { return };
             let mut flags = KEYEVENTF_SCANCODE;
             if extended {
                 flags |= KEYEVENTF_EXTENDEDKEY;
@@ -307,122 +322,201 @@ mod imp {
         unsafe { SendInput(&[input], size_of::<INPUT>() as i32) };
     }
 
-    /// USB HID usage to a set 1 scancode, and whether it's an extended (E0) key.
-    fn scancode(usage: u16) -> Option<(u16, bool)> {
-        // a..z in HID order
-        const LETTERS: [u16; 26] = [
-            0x1E, 0x30, 0x2E, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26, 0x32, 0x31, 0x18, 0x19, 0x10, 0x13,
-            0x1F, 0x14, 0x16, 0x2F, 0x11, 0x2D, 0x15, 0x2C,
-        ];
-        // F1..F12, F13..F24
-        const FKEYS: [u16; 12] = [0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x57, 0x58];
-        const FKEYS_HIGH: [u16; 12] = [0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x76];
-        // keypad 1..9, 0
-        const NUMPAD: [u16; 10] = [0x4F, 0x50, 0x51, 0x4B, 0x4C, 0x4D, 0x47, 0x48, 0x49, 0x52];
-        let plain = |s| Some((s, false));
-        let ext = |s| Some((s, true));
-        match usage {
-            hid::A..=hid::Z => plain(LETTERS[(usage - hid::A) as usize]),
-            // 1..9 are 0x02..0x0A, 0 is 0x0B
-            hid::DIGIT1..=hid::DIGIT0 => plain(0x02 + usage - hid::DIGIT1),
-            hid::F1..=hid::F12 => plain(FKEYS[(usage - hid::F1) as usize]),
-            hid::F13..=hid::F24 => plain(FKEYS_HIGH[(usage - hid::F13) as usize]),
-            hid::NUMPAD1..=hid::NUMPAD0 => plain(NUMPAD[(usage - hid::NUMPAD1) as usize]),
-            hid::ENTER => plain(0x1C),
-            hid::ESCAPE => plain(0x01),
-            hid::BACKSPACE => plain(0x0E),
-            hid::TAB => plain(0x0F),
-            hid::SPACE => plain(0x39),
-            hid::MINUS => plain(0x0C),
-            hid::EQUAL => plain(0x0D),
-            hid::BRACKET_LEFT => plain(0x1A),
-            hid::BRACKET_RIGHT => plain(0x1B),
-            hid::BACKSLASH => plain(0x2B),
-            hid::SEMICOLON => plain(0x27),
-            hid::QUOTE => plain(0x28),
-            hid::BACKQUOTE => plain(0x29),
-            hid::COMMA => plain(0x33),
-            hid::PERIOD => plain(0x34),
-            hid::SLASH => plain(0x35),
-            hid::CAPS_LOCK => plain(0x3A),
-            hid::PRINT_SCREEN => ext(0x37),
-            hid::SCROLL_LOCK => plain(0x46),
-            hid::INSERT => ext(0x52),
-            hid::HOME => ext(0x47),
-            hid::PAGE_UP => ext(0x49),
-            hid::DELETE => ext(0x53),
-            hid::END => ext(0x4F),
-            hid::PAGE_DOWN => ext(0x51),
-            hid::ARROW_RIGHT => ext(0x4D),
-            hid::ARROW_LEFT => ext(0x4B),
-            hid::ARROW_DOWN => ext(0x50),
-            hid::ARROW_UP => ext(0x48),
-            hid::NUM_LOCK => plain(0x45),
-            hid::NUMPAD_DIVIDE => ext(0x35),
-            hid::NUMPAD_MULTIPLY => plain(0x37),
-            hid::NUMPAD_SUBTRACT => plain(0x4A),
-            hid::NUMPAD_ADD => plain(0x4E),
-            hid::NUMPAD_ENTER => ext(0x1C),
-            hid::NUMPAD_DECIMAL => plain(0x53),
-            hid::INTL_BACKSLASH => plain(0x56),
-            hid::CONTEXT_MENU => ext(0x5D),
-            hid::CONTROL_LEFT => plain(0x1D),
-            hid::SHIFT_LEFT => plain(0x2A),
-            hid::ALT_LEFT => plain(0x38),
-            hid::META_LEFT => ext(0x5B),
-            hid::CONTROL_RIGHT => ext(0x1D),
-            hid::SHIFT_RIGHT => plain(0x36),
-            hid::ALT_RIGHT => ext(0x38),
-            hid::META_RIGHT => ext(0x5C),
-            _ => None,
+
+}
+
+#[cfg(target_os = "macos")]
+mod imp {
+    //! CoreGraphics events. Needs the Accessibility permission for this program (or the
+    //! terminal running it).
+
+    use std::ffi::c_void;
+    use std::ptr::null;
+    use std::time::{Duration, Instant};
+
+    use fmp_proto::{MouseButton, Rect, hid};
+
+    pub const SUPPORTED: bool = true;
+    const DOUBLE_CLICK_TIME: Duration = Duration::from_millis(500);
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default, PartialEq)]
+    struct CGPoint {
+        x: f64,
+        y: f64,
+    }
+    #[repr(C)]
+    struct CGRect {
+        origin: CGPoint,
+        size: CGPoint,
+    }
+    type CGEventRef = *mut c_void;
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGDisplayBounds(display: u32) -> CGRect;
+        fn CGEventCreateMouseEvent(source: *const c_void, kind: u32, pos: CGPoint, button: u32) -> CGEventRef;
+        fn CGEventCreateKeyboardEvent(source: *const c_void, keycode: u16, down: bool) -> CGEventRef;
+        fn CGEventCreateScrollWheelEvent2(source: *const c_void, units: u32, count: u32, w1: i32, w2: i32, w3: i32) -> CGEventRef;
+        fn CGEventSetFlags(event: CGEventRef, flags: u64);
+        fn CGEventSetIntegerValueField(event: CGEventRef, field: u32, value: i64);
+        fn CGEventPost(tap: u32, event: CGEventRef);
+        fn CGPreflightPostEventAccess() -> bool;
+        fn CGRequestPostEventAccess() -> bool;
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFRelease(cf: *const c_void);
+    }
+
+    pub struct Injector {
+        /// Our monitors (desktop pixels) and their display ids.
+        monitors: Vec<(Rect, u32)>,
+        pos: CGPoint,
+        held: Option<MouseButton>,
+        modifiers: u64,
+        last_click: Option<(MouseButton, Instant, CGPoint)>,
+        click_count: i64,
+    }
+
+    impl Injector {
+        pub fn new(monitors: &[Rect], displays: &[u32]) -> Self {
+            // SAFETY: permission queries; the request shows the system prompt once.
+            if !unsafe { CGPreflightPostEventAccess() } {
+                unsafe { CGRequestPostEventAccess() };
+                tracing::warn!(
+                    "the host's keyboard and mouse need the Accessibility permission: allow freemonplay-client \
+                     (or the terminal running it) in System Settings > Privacy & Security > Accessibility"
+                );
+            }
+            Self {
+                monitors: monitors.iter().copied().zip(displays.iter().copied()).collect(),
+                pos: CGPoint::default(),
+                held: None,
+                modifiers: 0,
+                last_click: None,
+                click_count: 1,
+            }
+        }
+
+        /// Desktop pixels to global points, through the display the point is on.
+        fn to_global(&self, x: f64, y: f64) -> Option<CGPoint> {
+            let &(m, id) = self.monitors.iter().find(|(m, _)| m.contains(x, y))?;
+            // SAFETY: plain query.
+            let b = unsafe { CGDisplayBounds(id) };
+            Some(CGPoint {
+                x: b.origin.x + (x - m.x as f64) / m.width as f64 * b.size.x,
+                y: b.origin.y + (y - m.y as f64) / m.height as f64 * b.size.y,
+            })
+        }
+
+        pub fn move_to(&mut self, x: f64, y: f64) {
+            let Some(pos) = self.to_global(x, y) else { return };
+            self.pos = pos;
+            let (kind, button) = match self.held {
+                Some(MouseButton::Left) => (6, 0),
+                Some(MouseButton::Right) => (7, 1),
+                Some(b) => (27, cg_button(b)),
+                None => (5, 0),
+            };
+            // SAFETY: creating, posting and releasing our own event.
+            unsafe { self.post(CGEventCreateMouseEvent(null(), kind, self.pos, button)) }
+        }
+
+        pub fn button(&mut self, button: MouseButton, pressed: bool) {
+            let kind = match (button, pressed) {
+                (MouseButton::Left, true) => 1,
+                (MouseButton::Left, false) => 2,
+                (MouseButton::Right, true) => 3,
+                (MouseButton::Right, false) => 4,
+                (_, true) => 25,
+                (_, false) => 26,
+            };
+            if pressed {
+                // macOS needs an explicit click count to see double and triple clicks.
+                let now = Instant::now();
+                let repeat = self.last_click.is_some_and(|(b, t, p)| {
+                    b == button && now - t < DOUBLE_CLICK_TIME && (p.x - self.pos.x).abs() < 4.0 && (p.y - self.pos.y).abs() < 4.0
+                });
+                self.click_count = if repeat { self.click_count + 1 } else { 1 };
+                self.last_click = Some((button, now, self.pos));
+                self.held = Some(button);
+            } else if self.held == Some(button) {
+                self.held = None;
+            }
+            // SAFETY: as above.
+            unsafe {
+                let e = CGEventCreateMouseEvent(null(), kind, self.pos, cg_button(button));
+                if !e.is_null() {
+                    CGEventSetIntegerValueField(e, 1, self.click_count);
+                }
+                self.post(e);
+            }
+        }
+
+        pub fn scroll(&mut self, dx: f32, dy: f32, precise: bool) {
+            let units = if precise { 0 } else { 1 };
+            // SAFETY: as above.
+            unsafe { self.post(CGEventCreateScrollWheelEvent2(null(), units, 2, dy.round() as i32, dx.round() as i32, 0)) }
+        }
+
+        pub fn key(&mut self, usage: u16, pressed: bool) {
+            let Some(code) = hid::mac_keycode(usage) else { return };
+            let flag = match usage {
+                hid::SHIFT_LEFT | hid::SHIFT_RIGHT => 0x0002_0000,
+                hid::CONTROL_LEFT | hid::CONTROL_RIGHT => 0x0004_0000,
+                hid::ALT_LEFT | hid::ALT_RIGHT => 0x0008_0000,
+                hid::META_LEFT | hid::META_RIGHT => 0x0010_0000,
+                _ => 0,
+            };
+            if pressed { self.modifiers |= flag } else { self.modifiers &= !flag }
+            // SAFETY: as above.
+            unsafe { self.post(CGEventCreateKeyboardEvent(null(), code, pressed)) }
+        }
+
+        /// Applies the held modifiers, posts and releases. Tolerates null.
+        unsafe fn post(&self, event: CGEventRef) {
+            if event.is_null() {
+                return;
+            }
+            // SAFETY: a live event we own one reference to.
+            unsafe {
+                CGEventSetFlags(event, self.modifiers);
+                CGEventPost(0, event);
+                CFRelease(event);
+            }
         }
     }
 
-    pub fn clipboard_text() -> Option<String> {
-        arboard::Clipboard::new().ok()?.get_text().ok().filter(|t| !t.is_empty())
-    }
-
-    pub fn set_clipboard(text: &str) {
-        if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(text)) {
-            tracing::warn!("couldn't set the clipboard: {e}");
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn maps_keys_to_scancodes() {
-            assert_eq!(scancode(hid::A), Some((0x1E, false)));
-            assert_eq!(scancode(hid::DIGIT0), Some((0x0B, false)));
-            assert_eq!(scancode(hid::ARROW_UP), Some((0x48, true)));
-            assert_eq!(scancode(hid::F24), Some((0x76, false)));
+    fn cg_button(b: MouseButton) -> u32 {
+        match b {
+            MouseButton::Left => 0,
+            MouseButton::Right => 1,
+            MouseButton::Middle => 2,
+            MouseButton::Back => 3,
+            MouseButton::Forward => 4,
         }
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 mod imp {
-    //! Not yet: macOS (CGEvent) and Linux (libei or uinput) clients can't be controlled.
-    use fmp_proto::MouseButton;
+    //! Not yet: Linux clients (libei, or uinput) can't be controlled.
+    use fmp_proto::{MouseButton, Rect};
 
     pub const SUPPORTED: bool = false;
 
     pub struct Injector;
 
     impl Injector {
-        pub fn move_to(&self, _x: f64, _y: f64) {}
-        pub fn button(&self, _button: MouseButton, _pressed: bool) {}
-        pub fn scroll(&self, _dx: f32, _dy: f32, _precise: bool) {}
-        pub fn key(&self, _usage: u16, _pressed: bool) {}
+        pub fn new(_monitors: &[Rect], _displays: &[u32]) -> Self {
+            Self
+        }
+        pub fn move_to(&mut self, _x: f64, _y: f64) {}
+        pub fn button(&mut self, _button: MouseButton, _pressed: bool) {}
+        pub fn scroll(&mut self, _dx: f32, _dy: f32, _precise: bool) {}
+        pub fn key(&mut self, _usage: u16, _pressed: bool) {}
     }
-
-    pub fn clipboard_text() -> Option<String> {
-        None
-    }
-
-    pub fn set_clipboard(_text: &str) {}
 }
 
 #[cfg(test)]
@@ -437,7 +531,8 @@ mod tests {
     fn mixed_layout_returns_on_entering_the_screen() {
         // Keyboard and mouse monitor on the left of the streamed screen.
         let layout = KvmLayout { monitors: vec![rect(-1920, 0, 1920, 1080)], screen: Some(rect(0, 0, 2736, 1824)) };
-        let mut remote = Remote::new(layout, vec![1.0], false, Arc::default());
+        let setup = Setup { layout, scales: vec![1.0], displays: vec![0], swap_command_control: false };
+        let mut remote = Remote::new(setup, Arc::default(), None);
         remote.handle(&HostMsg::RemoteEnter { monitor: 0, x: 0.99, y: 0.5, back: None });
         assert!(remote.move_by(-5.0, 0.0).is_empty());
         let out = remote.move_by(50.0, 0.0);
@@ -448,7 +543,8 @@ mod tests {
     #[test]
     fn beside_layout_returns_across_the_facing_edge_and_slides_elsewhere() {
         let layout = KvmLayout { monitors: vec![rect(0, 0, 1920, 1080)], screen: None };
-        let mut remote = Remote::new(layout, vec![2.0], false, Arc::default());
+        let setup = Setup { layout, scales: vec![2.0], displays: vec![0], swap_command_control: false };
+        let mut remote = Remote::new(setup, Arc::default(), None);
         remote.handle(&HostMsg::RemoteEnter { monitor: 0, x: 0.0, y: 0.5, back: Some(Edge::Left) });
         // Up past the top: slides along it instead of leaving.
         assert!(remote.move_by(10.0, -1000.0).is_empty());

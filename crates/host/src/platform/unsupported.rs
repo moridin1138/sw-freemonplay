@@ -99,8 +99,16 @@ pub mod kvm {
     }
     pub fn capture_cursor(_park: (f64, f64)) {}
     pub fn release_cursor(_at: (f64, f64)) {}
-    pub fn clipboard_text() -> Option<String> {
+}
+
+pub mod clipboard {
+    pub fn change_count() -> i64 {
+        0
+    }
+    pub fn text() -> Option<String> {
         None
     }
-    pub fn set_clipboard(_text: &str) {}
+    pub fn set_text(_text: &str) -> i64 {
+        0
+    }
 }

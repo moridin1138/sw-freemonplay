@@ -4,7 +4,7 @@ Roughly in priority order. Done items move to [CHANGELOG.md](CHANGELOG.md).
 
 ## In progress
 
-- **Keyboard and mouse mode.** Built (protocol 8) for Windows clients: mixed and keyboard-and-mouse-only layouts, text clipboard, escape shortcut. Keyboard-and-mouse-only layout tested on the Surface: crossing, return by edge and release on disconnect all work. The mixed layout still needs a client with a second monitor. Still to do: macOS clients (CGEvent) and Linux clients (libei or uinput); images and files on the clipboard; clipboard sync for ordinary screen sessions too; a per-client layout editor if "side of the main display" turns out too coarse.
+- **Keyboard and mouse mode.** Built (protocol 8) for Windows clients: mixed and keyboard-and-mouse-only layouts, text clipboard, escape shortcut. Keyboard-and-mouse-only layout tested on the Surface: crossing, return by edge and release on disconnect all work. The mixed layout still needs a client with a second monitor. Mac clients built too (CGEvent; untested, needs a second Mac). Still to do: Linux clients (libei or uinput); images and files on the clipboard; a per-client layout editor if "side of the main display" turns out too coarse.
 - **Several monitors on one client.** Built (protocol 5): each extra monitor is its own session and its own screen on the host. Needs testing with real extra monitors on Windows, and on Mac and Linux clients.
 - **Keep client screens awake.** Tested on macOS. Windows (`SetThreadExecutionState`) and Linux (D-Bus ScreenSaver inhibit, with GNOME session manager fallback) still need checking on real machines.
 
@@ -22,7 +22,7 @@ Roughly in priority order. Done items move to [CHANGELOG.md](CHANGELOG.md).
 - **Windows host** (extra screens for a Windows PC): bundle an Indirect Display Driver, capture with Windows.Graphics.Capture, hardware encode with Media Foundation/NVENC.
 - **Linux host**: GNOME/KDE/wlroots virtual monitors, PipeWire capture, VAAPI encode.
 - **Android client**: Android tablets as extra screens (MediaCodec decoding).
-- **Client packaging**: Mac client `.app`, Windows installer, Linux desktop entry and AppImage/Flatpak.
+- **Linux packaging**: AppImage or Flatpak (bundling GStreamer). The Mac client app and Windows installer are done.
 
 ## Housekeeping
 
