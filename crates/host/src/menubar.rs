@@ -8,20 +8,24 @@ use std::time::Duration;
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
-use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
+use objc2::{AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
     NSControlStateValueOff, NSControlStateValueOn, NSEvent, NSImage, NSMenu, NSMenuDelegate, NSMenuItem,
     NSPasteboard, NSPasteboardTypeString, NSScreen, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
     NSWorkspace,
 };
-use objc2_foundation::{NSObject, NSObjectProtocol, NSString, NSTimer, NSURL};
+use objc2_foundation::{NSData, NSObject, NSObjectProtocol, NSSize, NSString, NSTimer, NSURL};
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
 use crate::encoder::CodecChoice;
 use crate::session::Ctx;
 
 const FPS_CHOICES: [u32; 4] = [30, 60, 90, 120];
+
+/// The freemonplay mark redrawn for the menu bar: a vector template image (see
+/// build/macos/icon/make-menubar-icon.swift).
+const MENUBAR_ICON_PDF: &[u8] = include_bytes!("../../../build/macos/icon/menubar.pdf");
 const CODEC_CHOICES: [(CodecChoice, &str); 3] =
     [(CodecChoice::Auto, "Automatic"), (CodecChoice::H264, "H.264"), (CodecChoice::H265, "HEVC")];
 
@@ -37,11 +41,12 @@ pub fn run(ctx: Arc<Ctx>, log: PathBuf) {
     // Remembers where the user Cmd-drags the icon to.
     item.setAutosaveName(Some(&NSString::from_str("freemonplay")));
     if let Some(button) = item.button(mtm) {
-        let symbol = NSImage::imageWithSystemSymbolName_accessibilityDescription(
-            &NSString::from_str("display.2"),
-            Some(&NSString::from_str("freemonplay")),
-        );
-        match symbol {
+        match menubar_icon().or_else(|| {
+            NSImage::imageWithSystemSymbolName_accessibilityDescription(
+                &NSString::from_str("display.2"),
+                Some(&NSString::from_str("freemonplay")),
+            )
+        }) {
             Some(image) => {
                 image.setTemplate(true);
                 button.setImage(Some(&image));
@@ -369,6 +374,15 @@ impl Controller {
         item.setTag(tag);
         item
     }
+}
+
+/// The embedded menu bar icon, as a template image macOS tints for light/dark menu bars.
+fn menubar_icon() -> Option<Retained<NSImage>> {
+    let data = NSData::with_bytes(MENUBAR_ICON_PDF);
+    let image = NSImage::initWithData(NSImage::alloc(), &data)?;
+    image.setSize(NSSize::new(18.0, 18.0));
+    image.setAccessibilityDescription(Some(&NSString::from_str("freemonplay")));
+    Some(image)
 }
 
 fn copy_to_clipboard(text: &str) {

@@ -25,7 +25,7 @@ tracing-subscriber.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSGeometry", "NSObject", "NSTimer", "NSDate", "NSURL", "NSError", "NSProcessInfo"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSGeometry", "NSObject", "NSTimer", "NSDate", "NSURL", "NSError", "NSProcessInfo", "NSData"] }
 objc2-screen-capture-kit = "0.3"
 objc2-core-media = "0.3"
 objc2-core-video = "0.3"

@@ -1,3 +1,5 @@
+<img src="build/macos/icon/icon-1024.png" alt="freemonplay icon" width="128" align="right">
+
 # freemonplay
 
 Turn any spare laptop, tablet or PC into an extra monitor for your Mac, over the network. Free and open source.
