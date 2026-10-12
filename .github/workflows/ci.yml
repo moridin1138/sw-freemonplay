@@ -70,7 +70,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install GStreamer development files
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+        # The runner image's libunwind-14-dev conflicts with the libunwind-dev that
+        # libgstreamer1.0-dev needs, so remove it first.
+        run: |
+          sudo apt-get update
+          sudo apt-get remove -y libunwind-14-dev || true
+          sudo apt-get install -y --no-install-recommends libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - uses: Swatinem/rust-cache@v2
       - name: Test
         run: cargo test --workspace --locked

@@ -46,6 +46,11 @@ impl VirtualDisplay {
     pub fn create(_name: &str, _serial: u32, _req: &DisplayRequest) -> Result<Self> {
         bail!("virtual displays are not implemented on this OS yet")
     }
+
+    /// Never reached (`create` always fails), but keeps callers platform independent.
+    pub fn id(&self) -> u32 {
+        0
+    }
 }
 
 pub struct Capture;

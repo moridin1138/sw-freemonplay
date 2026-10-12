@@ -289,9 +289,10 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     let watchdog = async {
         tokio::time::sleep(Duration::from_secs(3)).await;
         if !slot.has_frame() {
-            let message = "no frames are being captured. Check that the app running the host has Screen \
-                           Recording permission (System Settings > Privacy & Security > Screen & System \
-                           Audio Recording), then restart it."
+            let message = "no frames are being captured. Check that freemonplay (or the terminal running \
+                           it) has Screen Recording permission in System Settings > Privacy & Security > \
+                           Screen & System Audio Recording, then restart it. If it's already on, remove \
+                           the entry and allow it again: it may belong to an older build."
                 .to_string();
             tracing::warn!("{who}: {message}");
             write_msg(&mut send, &HostMsg::Notice { message }).await?;

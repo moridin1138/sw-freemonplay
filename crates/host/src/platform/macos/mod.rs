@@ -58,21 +58,24 @@ pub fn prioritize_current_thread() {
 /// Only warns: the preflight check can report "denied" in setups where capture works
 /// anyway, so the real signal is whether frames arrive (each session warns if they don't).
 pub fn check_permissions() -> Result<()> {
+    // Permissions belong to the app when bundled, otherwise to whatever terminal launched us.
+    let who = if crate::launched_from_app_bundle() { "freemonplay" } else { "your terminal app" };
     // SAFETY: plain CoreGraphics queries with no arguments.
     unsafe {
         if !cg::CGPreflightScreenCaptureAccess() {
             cg::CGRequestScreenCaptureAccess();
             tracing::warn!(
-                "macOS reports no Screen Recording permission. If clients stay black, enable it for \
-                 your terminal app in System Settings > Privacy & Security > Screen & System Audio \
-                 Recording, then restart the terminal."
+                "macOS reports no Screen Recording permission. If screens stay black, enable it for {who} \
+                 in System Settings > Privacy & Security > Screen & System Audio Recording, then restart {who}. \
+                 If it's already on there, it may belong to an older build: remove it with the minus button \
+                 (or `tccutil reset ScreenCapture io.github.moridin1138.freemonplay`) and allow it again."
             );
         }
         if !cg::CGPreflightPostEventAccess() {
             cg::CGRequestPostEventAccess();
             tracing::warn!(
-                "Accessibility permission is missing, so input from clients will be ignored. \
-                 Enable it for your terminal app in System Settings > Privacy & Security > Accessibility."
+                "Accessibility permission is missing, so input from screens will be ignored. Enable it for \
+                 {who} in System Settings > Privacy & Security > Accessibility."
             );
         }
     }

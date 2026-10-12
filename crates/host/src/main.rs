@@ -1,6 +1,10 @@
 //! freemonplay host: advertises itself on the LAN, and for every client that connects it
 //! creates a virtual display matching the client's screen and streams it there.
 
+// Only macOS hosts exist so far: on other OSes the menu bar's session/settings APIs and the
+// capture helpers have no callers yet.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 mod encoder;
 mod frame;
 #[cfg(target_os = "macos")]

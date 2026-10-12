@@ -101,5 +101,8 @@ if $install; then
     fi
     rm -rf "$dest"
     cp -R "$app" "$dest"
+    # Leave only one copy, so Spotlight and Launchpad can't open the build copy by mistake
+    # (permissions and the Documents-folder prompts make that copy misbehave).
+    rm -rf "$app"
     echo "Installed $dest. Open it from Launchpad or Spotlight."
 fi
