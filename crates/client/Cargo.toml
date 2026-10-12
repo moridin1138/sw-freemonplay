@@ -1,6 +1,6 @@
 [package]
-name = "freemonplay-client"
-description = "Shows a freemonplay virtual display full screen and sends input back"
+name = "freemonplay-screen"
+description = "Shows a Freemonplay virtual display full screen and sends input back"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

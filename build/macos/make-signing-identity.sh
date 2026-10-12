@@ -48,4 +48,4 @@ security add-trusted-cert -r trustRoot -p codeSign -k "$keychain" "$tmp/cert.pem
 
 echo
 echo "Done. Run ./build/macos/bundle.sh --install; the app will be signed with \"$name\"."
-echo "Grant Screen Recording and Accessibility to freemonplay once more; after that they stick."
+echo "Grant Screen Recording and Accessibility to Freemonplay Host once more; after that they stick."

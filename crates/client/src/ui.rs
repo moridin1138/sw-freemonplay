@@ -110,6 +110,7 @@ pub enum Action {
     CancelCode,
     CancelConnect,
     Disconnect,
+    ShowLog,
 }
 
 /// Graphite and amber, matching the app icon, in dark mode.
@@ -150,6 +151,64 @@ pub fn icon_rgba() -> Option<(u32, u32, Vec<u8>)> {
 /// Keyboard shortcut text with this OS's key names (Control, Option and Shift on a Mac).
 pub fn shortcut(key: char) -> String {
     if cfg!(target_os = "macos") { format!("Control+Option+Shift+{key}") } else { format!("Ctrl+Alt+Shift+{key}") }
+}
+
+/// The toolbar over a streamed screen: what it shows.
+pub struct Toolbar<'a> {
+    pub host: &'a str,
+    /// Size, codec and frame rate.
+    pub detail: &'a str,
+    pub fullscreen: bool,
+}
+
+pub enum ToolbarAction {
+    Disconnect,
+    ToggleFullscreen,
+}
+
+/// The toolbar at the top of a streamed screen, shown while the pointer is at the top edge.
+/// Returns what was clicked, and the toolbar's area in points (the pointer there is ours,
+/// not the host's).
+pub fn toolbar(ctx: &egui::Context, bar: &Toolbar) -> (Option<ToolbarAction>, egui::Rect) {
+    let mut action = None;
+    let area = egui::Area::new(egui::Id::new("toolbar")).anchor(egui::Align2::CENTER_TOP, [0.0, 10.0]).show(ctx, |ui| {
+        egui::Frame::new()
+            .fill(CARD)
+            .stroke(Stroke::new(1.0, CARD_EDGE))
+            .corner_radius(CornerRadius::same(12))
+            .inner_margin(egui::Margin::symmetric(14, 8))
+            .shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(120) })
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    screen_glyph(ui, AMBER);
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(bar.host).strong());
+                        ui.label(RichText::new(bar.detail).small().color(MUTED));
+                    });
+                    ui.add_space(16.0);
+                    let label = if bar.fullscreen { "Exit Full Screen" } else { "Full Screen" };
+                    if ui.add(egui::Button::new(label).min_size(vec2(96.0, 32.0))).clicked() {
+                        action = Some(ToolbarAction::ToggleFullscreen);
+                    }
+                    if primary(ui, "Disconnect", true) {
+                        action = Some(ToolbarAction::Disconnect);
+                    }
+                });
+            });
+    });
+    (action, area.response.rect)
+}
+
+/// The first few seconds of a stream: how to get the toolbar back.
+pub fn stream_hint(ctx: &egui::Context) {
+    egui::Area::new(egui::Id::new("hint")).anchor(egui::Align2::CENTER_TOP, [0.0, 24.0]).show(ctx, |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.label(format!(
+                "Move the pointer to the top edge for Disconnect and Full Screen · {} disconnects",
+                shortcut('D')
+            ));
+        });
+    });
 }
 
 pub struct View<'a> {
@@ -196,7 +255,7 @@ fn header(ui: &mut egui::Ui, logo: Option<&egui::TextureHandle>) {
         ui.add_space(4.0);
         ui.vertical(|ui| {
             ui.add_space(6.0);
-            ui.label(RichText::new("freemonplay").size(24.0).strong().color(Color32::WHITE));
+            ui.label(RichText::new("Freemonplay Screen").size(24.0).strong().color(Color32::WHITE));
             ui.label(RichText::new("Use this screen as an extra display for a computer on your network.").color(MUTED));
         });
     });
@@ -269,11 +328,11 @@ fn hosts(
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label("Looking for computers running freemonplay…");
+                ui.label("Looking for computers running Freemonplay…");
             });
             ui.label(
                 RichText::new(
-                    "Open freemonplay on the computer you want more screens for. If it doesn't show up, a firewall may \
+                    "Open Freemonplay on the computer you want more screens for. If it doesn't show up, a firewall may \
                      be blocking discovery: use Connect by address below.",
                 )
                 .color(MUTED)
@@ -329,7 +388,7 @@ fn hosts(
     ui.add_space(10.0);
     ui.label(
         RichText::new(format!(
-            "While connected: {} disconnects · {} full screen on or off · {} quits",
+            "While connected: the pointer at the top edge shows Disconnect and Full Screen. Or {} disconnects · {} full screen on or off · {} quits",
             shortcut('D'),
             shortcut('F'),
             shortcut('Q')
@@ -337,7 +396,12 @@ fn hosts(
         .color(MUTED)
         .small(),
     );
-    ui.label(RichText::new(format!("freemonplay {}", env!("CARGO_PKG_VERSION"))).color(MUTED.linear_multiply(0.7)).small());
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(format!("Freemonplay Screen {}", env!("CARGO_PKG_VERSION"))).color(MUTED.linear_multiply(0.7)).small());
+        if ui.link(RichText::new("Show log").small()).clicked() {
+            action = Some(Action::ShowLog);
+        }
+    });
     action
 }
 
@@ -451,7 +515,7 @@ fn remote(ui: &mut egui::Ui, host: &str) -> Option<Action> {
     card(ui, |ui| {
         ui.label(
             "Its keyboard and mouse can now move onto this computer's monitors: push its pointer off the side of \
-             its main display that faces this one (chosen in freemonplay's menu there). Moving back returns them.",
+             its main display that faces this one (chosen in Freemonplay's menu there). Moving back returns them.",
         );
         ui.label(RichText::new(format!("{} on that computer brings them back from anywhere.", shortcut('K'))).color(MUTED));
         ui.label(RichText::new("Text and images you copy on one computer can be pasted on the other.").color(MUTED));
@@ -467,7 +531,7 @@ fn code_dialog(ui: &mut egui::Ui, host: &str, code: &mut String, error: Option<&
     let mut action = None;
     section(ui, &format!("Pair with {host}"));
     card(ui, |ui| {
-        ui.label("Enter the 6 digit pairing code shown in freemonplay's menu on that computer.");
+        ui.label("Enter the 6 digit pairing code shown in Freemonplay's menu on that computer.");
         ui.label(RichText::new("You only need to do this once.").color(MUTED).small());
         ui.add_space(6.0);
         let field = ui.add(

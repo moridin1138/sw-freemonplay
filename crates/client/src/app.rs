@@ -37,6 +37,10 @@ use crate::{CodecArg, Scale};
 
 const PICKER_SIZE: LogicalSize<f64> = LogicalSize::new(560.0, 470.0);
 const DEFAULT_WINDOWED: (u32, u32) = (1280, 800);
+/// The pointer this close to the top edge (points) shows the toolbar.
+const TOOLBAR_EDGE: f64 = 3.0;
+/// How long the toolbar stays after the pointer leaves it.
+const TOOLBAR_LINGER: Duration = Duration::from_millis(700);
 /// The display that holds the host list; it always exists.
 const MAIN: usize = 0;
 
@@ -158,6 +162,12 @@ pub struct App {
     modifiers: ModifiersState,
     /// Show the shortcut hint over the video until then.
     hint_until: Option<Instant>,
+    toolbar: ToolbarState,
+    /// The main screen's host and stream, for the toolbar.
+    host_name: String,
+    /// Size and codec.
+    stream_detail: String,
+    shown_fps: Option<f32>,
     /// Keeps this screen on while connected (when the option is set).
     awake: Option<KeepAwake>,
     /// Network link tuned for streaming while connected (Windows Wi-Fi), and its
@@ -206,6 +216,10 @@ impl App {
             repaint_at: None,
             modifiers: ModifiersState::empty(),
             hint_until: None,
+            toolbar: ToolbarState::default(),
+            host_name: String::new(),
+            stream_detail: String::new(),
+            shown_fps: None,
             awake: None,
             link: None,
             network: None,
@@ -235,7 +249,7 @@ impl App {
     }
 
     fn open_window(&mut self, event_loop: &ActiveEventLoop) -> anyhow::Result<()> {
-        let mut attrs = Window::default_attributes().with_title("freemonplay").with_inner_size(PICKER_SIZE);
+        let mut attrs = Window::default_attributes().with_title("Freemonplay Screen").with_inner_size(PICKER_SIZE);
         if let Some(i) = self.startup.monitor {
             let monitor = event_loop.available_monitors().nth(i);
             match monitor {
@@ -488,7 +502,7 @@ impl App {
                         let _ = live.out.send(ClientMsg::Network(network));
                     }
                 }
-                main.window.set_title(&format!("freemonplay: {host_name} (keyboard and mouse)"));
+                main.window.set_title(&format!("Freemonplay: {host_name} (keyboard and mouse)"));
             }
             self.screen = Screen::Remote { host: host_name };
             self.redraw();
@@ -505,8 +519,8 @@ impl App {
         display.video = Some((width, height));
         let w = &display.window;
         match &display.extra {
-            Some((_, screen)) => w.set_title(&format!("freemonplay: {host_name} ({})", screen.name)),
-            None => w.set_title(&format!("freemonplay: {host_name}")),
+            Some((_, screen)) => w.set_title(&format!("Freemonplay: {host_name} ({})", screen.name)),
+            None => w.set_title(&format!("Freemonplay: {host_name}")),
         }
         if fullscreen {
             w.set_fullscreen(Some(Fullscreen::Borderless(display.monitor())));
@@ -519,10 +533,14 @@ impl App {
             return;
         }
         self.screen = Screen::Streaming;
+        self.host_name = host_name;
+        self.stream_detail = format!("{width}×{height} {codec}");
+        self.shown_fps = None;
+        self.toolbar = ToolbarState::default();
         if self.options.keep_awake {
             self.awake = KeepAwake::start();
         }
-        self.hint_until = Some(Instant::now() + Duration::from_secs(4));
+        self.hint_until = Some(Instant::now() + Duration::from_secs(5));
         self.repaint_at = self.hint_until;
         // Paired by now, so the other monitors can join with the saved pairing.
         self.open_extras(event_loop);
@@ -560,7 +578,7 @@ impl App {
     fn open_extra_window(&self, event_loop: &ActiveEventLoop, monitor: &MonitorHandle, screen: ScreenId) -> anyhow::Result<Display> {
         let p = monitor.position();
         let mut attrs = Window::default_attributes()
-            .with_title(format!("freemonplay ({})", screen.name))
+            .with_title(format!("Freemonplay ({})", screen.name))
             .with_position(PhysicalPosition::new(p.x + 80, p.y + 80));
         attrs = match self.options.fullscreen {
             true => attrs.with_fullscreen(Some(Fullscreen::Borderless(Some(monitor.clone())))),
@@ -615,7 +633,7 @@ impl App {
         let w = &main.window;
         w.set_fullscreen(None);
         w.set_cursor_visible(true);
-        w.set_title("freemonplay");
+        w.set_title("Freemonplay Screen");
         let _ = w.request_inner_size(PICKER_SIZE);
         // The other monitors end with the main one.
         let extras: Vec<usize> = self.displays.keys().copied().filter(|&v| v != MAIN).collect();
@@ -634,6 +652,7 @@ impl App {
         self.network = None;
         self.input_only = false;
         self.hint_until = None;
+        self.toolbar = ToolbarState::default();
         self.target = None;
         // A failed first pairing goes back to the code dialog; anything else to the list.
         match live.pairing {
@@ -647,7 +666,11 @@ impl App {
             }
             _ => {
                 self.screen = Screen::Hosts;
-                self.message = (!live.disconnecting).then(|| format!("Disconnected: {reason}"));
+                self.message = Some(if live.disconnecting {
+                    format!("Disconnected from {}.", self.host_name)
+                } else {
+                    format!("Disconnected: {reason}")
+                });
             }
         }
         self.redraw();
@@ -670,6 +693,7 @@ impl App {
             }
             Action::CancelCode => self.screen = Screen::Hosts,
             Action::Disconnect => self.disconnect(),
+            Action::ShowLog => crate::open_log(),
             Action::CancelConnect => {
                 if let Some(main) = self.displays.get_mut(&MAIN) {
                     if let Some(task) = main.task.take() {
@@ -731,29 +755,52 @@ impl App {
         }
     }
 
-    /// The video, with the shortcut hint on top of the main display for the first few
-    /// seconds.
+    /// The video, with the hint (for the first few seconds) or the toolbar on top of the
+    /// main display.
     fn draw_stream(&mut self, view: usize) {
-        let hint = view == MAIN && self.hint_until.is_some_and(|t| Instant::now() < t);
+        let now = Instant::now();
+        if self.toolbar.hide_at.is_some_and(|t| now >= t) {
+            self.toolbar = ToolbarState::default();
+        }
+        let hint = view == MAIN && self.hint_until.is_some_and(|t| now < t) && !self.toolbar.shown;
+        let toolbar = view == MAIN && self.toolbar.shown;
         let Some(display) = self.displays.get_mut(&view) else { return };
         let new_frame = display.frames.take();
         if let Some(frame) = &new_frame {
             display.renderer.upload(frame);
         }
-        if hint && let Some(state) = self.egui_state.as_mut() {
+        let fullscreen = display.window.fullscreen().is_some();
+        let mut action = None;
+        if (hint || toolbar) && let Some(state) = self.egui_state.as_mut() {
             let window = display.window.clone();
             let raw = state.take_egui_input(&window);
             let ctx = self.egui_ctx.clone();
+            let detail = match self.shown_fps {
+                Some(fps) => format!("{} · {fps:.0} fps", self.stream_detail),
+                None => self.stream_detail.clone(),
+            };
+            let bar = ui::Toolbar { host: &self.host_name, detail: &detail, fullscreen };
+            let mut rect = None;
             let output = ctx.run_ui(raw, |ui| {
-                egui::Area::new(egui::Id::new("hint")).anchor(egui::Align2::CENTER_TOP, [0.0, 24.0]).show(ui.ctx(), |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.label(format!("{} disconnects · {} full screen on or off", ui::shortcut('D'), ui::shortcut('F')));
-                    });
-                });
+                if toolbar {
+                    let (clicked, area) = ui::toolbar(ui.ctx(), &bar);
+                    action = clicked;
+                    rect = Some(area);
+                } else {
+                    ui::stream_hint(ui.ctx());
+                }
             });
+            if toolbar {
+                self.toolbar.rect = rect;
+            }
             self.present_ui(&window, output);
         } else {
             display.renderer.render(None);
+        }
+        match action {
+            Some(ui::ToolbarAction::Disconnect) => return self.disconnect(),
+            Some(ui::ToolbarAction::ToggleFullscreen) => self.toggle_fullscreen(MAIN),
+            None => {}
         }
         let Some(display) = self.displays.get_mut(&view) else { return };
         // Counted after presenting, so it covers decode, upload and present.
@@ -763,8 +810,69 @@ impl App {
         if let Some(stats) = display.shown.take_report()
             && let Some(live) = &display.live
         {
+            if view == MAIN {
+                self.shown_fps = Some(stats.shown_fps);
+            }
             let _ = live.out.send(ClientMsg::Stats(stats));
         }
+    }
+
+    fn toggle_fullscreen(&mut self, view: usize) {
+        if let Some(display) = self.displays.get(&view) {
+            let w = &display.window;
+            let full = w.fullscreen().is_some();
+            w.set_fullscreen((!full).then(|| Fullscreen::Borderless(display.monitor())));
+        }
+    }
+
+    /// The toolbar appears when the pointer reaches the top edge of the main display and
+    /// stays while the pointer is on it. Returns whether the event is the toolbar's (and so
+    /// not the host's).
+    fn toolbar_input(&mut self, event: &WindowEvent) -> bool {
+        let Some(main) = self.displays.get(&MAIN) else { return false };
+        let window = main.window.clone();
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                let scale = window.scale_factor();
+                let (x, y) = (position.x / scale, position.y / scale);
+                let over = self.toolbar.shown
+                    && self.toolbar.rect.is_some_and(|r| r.expand(12.0).contains(egui::pos2(x as f32, y as f32)));
+                if y <= TOOLBAR_EDGE || over {
+                    if !self.toolbar.shown {
+                        self.toolbar.shown = true;
+                        window.request_redraw();
+                    }
+                    self.toolbar.hide_at = None;
+                } else if self.toolbar.shown && self.toolbar.hide_at.is_none() {
+                    self.linger_toolbar();
+                }
+                if over != self.toolbar.over {
+                    self.toolbar.over = over;
+                    // Our pointer over the toolbar; the host's (drawn in the video) elsewhere.
+                    window.set_cursor_visible(over);
+                }
+            }
+            WindowEvent::CursorLeft { .. } if self.toolbar.shown => self.linger_toolbar(),
+            _ => {}
+        }
+        let ours = self.toolbar.over
+            && matches!(
+                event,
+                WindowEvent::CursorMoved { .. } | WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. }
+            );
+        if ours
+            && let Some(state) = self.egui_state.as_mut()
+            && state.on_window_event(&window, event).repaint
+        {
+            window.request_redraw();
+        }
+        ours
+    }
+
+    fn linger_toolbar(&mut self) {
+        let at = Instant::now() + TOOLBAR_LINGER;
+        self.toolbar.hide_at = Some(at);
+        self.repaint_at = Some(self.repaint_at.map_or(at, |t| t.min(at)));
     }
 
     /// Draws egui output on the main display.
@@ -796,6 +904,9 @@ impl App {
         if self.host_in_control.load(Ordering::Relaxed) && !matches!(event, WindowEvent::Focused(_)) {
             return;
         }
+        if view == MAIN && self.toolbar_input(&event) {
+            return;
+        }
         let m = self.modifiers;
         let Some(display) = self.displays.get_mut(&view) else { return };
         match event {
@@ -810,12 +921,7 @@ impl App {
                             return event_loop.exit();
                         }
                         KeyCode::KeyD => return self.disconnect(),
-                        KeyCode::KeyF => {
-                            let w = &display.window;
-                            let full = w.fullscreen().is_some();
-                            w.set_fullscreen((!full).then(|| Fullscreen::Borderless(display.monitor())));
-                            return;
-                        }
+                        KeyCode::KeyF => return self.toggle_fullscreen(view),
                         _ => {}
                     }
                 }
@@ -958,6 +1064,18 @@ fn display_id(m: &MonitorHandle) -> u32 {
 fn rect_of(m: &MonitorHandle) -> Rect {
     let (p, size) = (m.position(), m.size());
     Rect { x: p.x, y: p.y, width: size.width, height: size.height }
+}
+
+/// The toolbar over the main display.
+#[derive(Default)]
+struct ToolbarState {
+    shown: bool,
+    /// The pointer is on it (so it's ours, not the host's).
+    over: bool,
+    /// Hide it then (the pointer has left).
+    hide_at: Option<Instant>,
+    /// Where it was drawn, in points.
+    rect: Option<egui::Rect>,
 }
 
 /// Frames shown and their received-to-shown time, reported to the host every 2 s and

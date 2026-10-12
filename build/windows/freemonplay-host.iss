@@ -17,13 +17,13 @@
 
 [Setup]
 AppId={{2B7D9E41-5C3A-4F86-A1E0-7D4C2B9F6E13}
-AppName=freemonplay host
+AppName=Freemonplay Host
 AppVersion={#Version}
-AppVerName=freemonplay host {#Version}
+AppVerName=Freemonplay Host {#Version}
 AppPublisher=moridin1138
 AppPublisherURL=https://github.com/moridin1138/sw-freemonplay
-DefaultDirName={autopf}\freemonplay host
-DefaultGroupName=freemonplay
+DefaultDirName={autopf}\Freemonplay Host
+DefaultGroupName=Freemonplay
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 OutputBaseFilename=freemonplay-host-windows-x64-setup
@@ -42,7 +42,7 @@ CloseApplications=force
 UsedUserAreasWarning=no
 
 [Tasks]
-Name: "startup"; Description: "Start freemonplay when I sign in"
+Name: "startup"; Description: "Start Freemonplay Host when I sign in"
 
 [Files]
 Source: "{#Source}\freemonplay-host.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -51,15 +51,15 @@ Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"
 Source: "..\..\README.md"; DestDir: "{app}"
 
 [Icons]
-Name: "{group}\freemonplay host"; Filename: "{app}\freemonplay-host.exe"; Comment: "Give this PC extra screens"
-Name: "{group}\Uninstall freemonplay host"; Filename: "{uninstallexe}"
+Name: "{group}\Freemonplay Host"; Filename: "{app}\freemonplay-host.exe"; Comment: "Give this PC extra screens"
+Name: "{group}\Uninstall Freemonplay Host"; Filename: "{uninstallexe}"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "freemonplay"; ValueData: """{app}\freemonplay-host.exe"""; Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
 Filename: "{app}\freemonplay-host.exe"; Parameters: "--install-display-driver ""{app}\driver"" --allow-firewall"; StatusMsg: "Installing the display driver and the firewall rule..."; Flags: runhidden waituntilterminated
-Filename: "{app}\freemonplay-host.exe"; Description: "Start freemonplay"; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{app}\freemonplay-host.exe"; Description: "Start Freemonplay Host"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
 Filename: "{app}\freemonplay-host.exe"; Parameters: "--quit"; Flags: runhidden waituntilterminated; RunOnceId: "StopHost"

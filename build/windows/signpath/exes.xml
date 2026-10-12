@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "exes": the two programs, before they go into the
+     installers. Paste into the SignPath project (Artifact configurations); kept here so
+     changes are reviewed like code. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file-set product-name="Freemonplay">
+      <include path="freemonplay-host.exe"/>
+      <include path="freemonplay-screen.exe"/>
+      <for-each>
+        <authenticode-sign/>
+      </for-each>
+    </pe-file-set>
+  </zip-file>
+</artifact-configuration>

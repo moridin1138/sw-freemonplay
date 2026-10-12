@@ -1,4 +1,4 @@
-# freemonplay: notes for Claude
+# Freemonplay: notes for Claude
 
 ## Keep the docs current
 
@@ -17,12 +17,12 @@ in the same change, before handing over a commit:
 ## Working on this repo
 
 - rustup comes from Homebrew: `export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`.
-- Windows client cross-build: `cargo build --release -p freemonplay-client --target x86_64-pc-windows-gnu`.
+- Windows client cross-build: `cargo build --release -p freemonplay-screen --target x86_64-pc-windows-gnu`.
 - Linux client: `./build/linux/build.sh` (Docker).
 - Mac host app: `./build/macos/bundle.sh --install`.
 - Bump `PROTOCOL_VERSION` in `crates/proto/src/lib.rs` whenever a message changes shape.
 - Before handing over: `cargo clippy --workspace --all-targets`, `cargo test --workspace`,
-  the Windows cross-build, and `freemonplay-client --self-test` when decoding or
+  the Windows cross-build, and `freemonplay-screen --self-test` when decoding or
   rendering changed.
 - The user commits and pushes; prepare the commit and give them the commands.
 - Writing style: no em-dashes or en-dashes; metric units.

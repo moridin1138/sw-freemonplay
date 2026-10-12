@@ -1,5 +1,5 @@
 /target
 .DS_Store
 
-# Installers built locally (build/macos/make-dmg.sh, build/windows/freemonplay.iss)
+# Installers built locally (build/macos/make-dmg.sh, build/windows/freemonplay-screen.iss)
 /dist/

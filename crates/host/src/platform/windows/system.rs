@@ -20,7 +20,7 @@ use windows::core::{HSTRING, PCWSTR, w};
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// The inbound firewall rule that lets screens reach the host.
-const FIREWALL_RULE: &str = "freemonplay (screens)";
+const FIREWALL_RULE: &str = "Freemonplay (screens)";
 
 const RUN_KEY: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Run");
 const RUN_VALUE: PCWSTR = w!("freemonplay");
@@ -70,7 +70,7 @@ pub fn allow_firewall() -> Result<()> {
     if !out.status.success() {
         bail!("couldn't add the firewall rule (run this as administrator): {}", String::from_utf8_lossy(&out.stdout).trim());
     }
-    println!("Screens can now reach freemonplay through Windows Firewall.");
+    println!("Screens can now reach Freemonplay through Windows Firewall.");
     Ok(())
 }
 
@@ -111,7 +111,7 @@ pub fn run_elevated(args: &str) -> Result<bool> {
     }
 }
 
-/// Starts freemonplay when this user signs in (the per-user Run key).
+/// Starts Freemonplay when this user signs in (the per-user Run key).
 pub fn start_at_login() -> bool {
     // SAFETY: a size-only query of our own value.
     unsafe { RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_VALUE, RRF_RT_REG_SZ, None, None, None).is_ok() }
@@ -142,18 +142,18 @@ pub fn open_path(path: &Path) {
 
 pub fn error_box(text: &str) {
     // SAFETY: a modal message box with valid strings.
-    unsafe { MessageBoxW(None, &HSTRING::from(text), w!("freemonplay"), MB_OK | MB_ICONERROR | MB_SETFOREGROUND) };
+    unsafe { MessageBoxW(None, &HSTRING::from(text), w!("Freemonplay Host"), MB_OK | MB_ICONERROR | MB_SETFOREGROUND) };
 }
 
 pub fn confirm(owner: HWND, text: &str) -> bool {
     // SAFETY: as above.
-    unsafe { MessageBoxW(Some(owner), &HSTRING::from(text), w!("freemonplay"), MB_YESNO | MB_ICONWARNING | MB_SETFOREGROUND) == IDYES }
+    unsafe { MessageBoxW(Some(owner), &HSTRING::from(text), w!("Freemonplay Host"), MB_YESNO | MB_ICONWARNING | MB_SETFOREGROUND) == IDYES }
 }
 
 /// Holds the "already running" marker for as long as this copy runs.
 pub struct SingleInstance(#[allow(dead_code)] windows::Win32::Foundation::HANDLE);
 
-/// None if freemonplay is already running for this user.
+/// None if Freemonplay is already running for this user.
 pub fn single_instance() -> Option<SingleInstance> {
     // SAFETY: a named mutex, kept until exit.
     unsafe {

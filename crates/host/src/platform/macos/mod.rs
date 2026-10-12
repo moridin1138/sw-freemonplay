@@ -87,7 +87,7 @@ pub fn request_input() {
 pub fn check_permissions() -> Result<()> {
     // Permissions belong to the app when bundled, otherwise to whatever terminal launched us.
     let bundled = crate::launched_from_app_bundle();
-    let who = if bundled { "freemonplay" } else { "your terminal app" };
+    let who = if bundled { "Freemonplay Host" } else { "your terminal app" };
     // The app's setup window explains and asks; from a terminal, ask straight away.
     // SAFETY: plain CoreGraphics queries with no arguments.
     unsafe {

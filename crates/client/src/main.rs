@@ -1,4 +1,4 @@
-//! freemonplay client: turns this screen into an extra monitor for a freemonplay host.
+//! Freemonplay client: turns this screen into an extra monitor for a Freemonplay host.
 //!
 //! Opens a window listing the hosts on the network; connecting fills the monitor the
 //! window is on, plus any other monitors picked under "Also use these monitors" (each
@@ -103,12 +103,7 @@ pub enum CodecArg {
 }
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,wgpu=warn,wgpu_core=error,wgpu_hal=error,naga=warn,quinn=warn,mdns_sd=warn".into()),
-        )
-        .init();
+    init_logging();
     let args = Args::parse();
     #[cfg(target_os = "windows")]
     hide_own_console();
@@ -177,6 +172,56 @@ fn hide_own_console() {
     }
 }
 
+/// Where the client logs: ~/Library/Logs/freemonplay on a Mac, %LOCALAPPDATA%\freemonplay
+/// on Windows, ~/.local/state/freemonplay on Linux.
+fn log_path() -> Option<PathBuf> {
+    let var = |name| std::env::var_os(name).map(PathBuf::from);
+    let dir = if cfg!(target_os = "macos") {
+        var("HOME")?.join("Library/Logs/freemonplay")
+    } else if cfg!(target_os = "windows") {
+        var("LOCALAPPDATA")?.join("freemonplay")
+    } else {
+        var("XDG_STATE_HOME").or_else(|| var("HOME").map(|h| h.join(".local/state")))?.join("freemonplay")
+    };
+    Some(dir.join("client.log"))
+}
+
+/// Logs to the terminal (if any) and to a file, which the app's "Show log" opens. The file
+/// starts over (keeping the previous one as client.old.log) once it passes 5 MB.
+fn init_logging() {
+    use tracing_subscriber::prelude::*;
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "info,wgpu=warn,wgpu_core=error,wgpu_hal=error,naga=warn,quinn=warn,mdns_sd=warn".into());
+    let file = log_path().and_then(|path| {
+        std::fs::create_dir_all(path.parent()?).ok()?;
+        if std::fs::metadata(&path).is_ok_and(|m| m.len() > 5 << 20) {
+            let _ = std::fs::rename(&path, path.with_file_name("client.old.log"));
+        }
+        std::fs::OpenOptions::new().create(true).append(true).open(&path).ok()
+    });
+    let file_layer = file.map(|f| tracing_subscriber::fmt::layer().with_ansi(false).with_writer(Mutex::new(f)));
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .with(file_layer)
+        .init();
+}
+
+/// Opens the log file with the usual program for text.
+pub fn open_log() {
+    let Some(path) = log_path() else { return };
+    let program = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(target_os = "windows") {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    if let Err(e) = std::process::Command::new(program).arg(&path).spawn() {
+        tracing::error!("couldn't open {}: {e}", path.display());
+    }
+}
+
 fn parse_size(s: &str) -> Result<(u32, u32)> {
     let (w, h) = s.split_once('x').context("expected WxH, e.g. 1280x800")?;
     Ok((w.trim().parse()?, h.trim().parse()?))
@@ -189,5 +234,5 @@ fn hostname() -> String {
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().trim_end_matches(".local").to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "freemonplay client".into())
+        .unwrap_or_else(|| "Freemonplay Screen".into())
 }

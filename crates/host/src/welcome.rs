@@ -45,7 +45,7 @@ impl Welcome {
             let view = NSImageView::imageViewWithImage(&image, mtm);
             view.into_super()
         });
-        let title = label(mtm, "Set up freemonplay", 22.0, true);
+        let title = label(mtm, "Set up Freemonplay", 22.0, true);
         let subtitle = wrapping(mtm, "This Mac gets extra screens: other computers, tablets or PCs on your network show them over Wi-Fi or Ethernet.", 13.0);
         subtitle.setTextColor(Some(&NSColor::secondaryLabelColor()));
         subtitle.setPreferredMaxLayoutWidth(TEXT_WIDTH - 80.0);
@@ -60,11 +60,11 @@ impl Welcome {
         // Step 1: Screen Recording.
         let screen_status = label(mtm, "", 13.0, true);
         let screen_button = button("Allow…", sel!(allowScreenRecording:));
-        let restart_button = button("Restart freemonplay", sel!(restartApp:));
+        let restart_button = button("Restart Freemonplay", sel!(restartApp:));
         let step1 = step(
             mtm,
             "1. Screen Recording",
-            "Lets freemonplay show your extra screens on the other devices. macOS applies it the next time freemonplay starts.",
+            "Lets Freemonplay show your extra screens on the other devices. macOS applies it the next time Freemonplay starts.",
             &screen_status,
             &[screen_button.clone().into_super().into_super(), restart_button.clone().into_super().into_super()],
         );
@@ -87,18 +87,18 @@ impl Welcome {
         let step3 = step(
             mtm,
             "3. Connect a screen",
-            "On the other device, install freemonplay Screen, open it and pick this Mac. The first time, it asks for this pairing code:",
+            "On the other device, install Freemonplay Screen, open it and pick this Mac. The first time, it asks for this pairing code:",
             &label(mtm, "", 13.0, false),
             &[
                 code.clone().into_super().into_super(),
                 button("Copy Code", sel!(copyCodeButton:)).into_super().into_super(),
-                button("Get freemonplay Screen…", sel!(openDownload:)).into_super().into_super(),
+                button("Get Freemonplay Screen…", sel!(openDownload:)).into_super().into_super(),
             ],
         );
 
         let done = button("Done", sel!(closeWelcome:));
         done.setKeyEquivalent(&NSString::from_str("\r"));
-        let footer_note = wrapping(mtm, "You'll find freemonplay in the menu bar. Setup Guide… there reopens this window.", 12.0);
+        let footer_note = wrapping(mtm, "You'll find Freemonplay in the menu bar. Setup Guide… there reopens this window.", 12.0);
         footer_note.setTextColor(Some(&NSColor::secondaryLabelColor()));
         footer_note.setPreferredMaxLayoutWidth(TEXT_WIDTH - 90.0);
         let footer = hstack(mtm, &[footer_note.into_super().into_super(), done.into_super().into_super()], 12.0);
@@ -122,7 +122,7 @@ impl Welcome {
             window.setReleasedWhenClosed(false);
             window
         };
-        window.setTitle(&NSString::from_str("Welcome to freemonplay"));
+        window.setTitle(&NSString::from_str("Welcome to Freemonplay"));
         window.setContentView(Some(&content));
         let fitting = content.fittingSize();
         window.setContentSize(NSSize::new(WIDTH, fitting.height.max(400.0)));
@@ -139,7 +139,7 @@ impl Welcome {
         let screen = platform::screen_recording_allowed();
         let (text, color) = match (screen, self.screen_at_launch) {
             (true, true) => ("✓ Allowed", NSColor::systemGreenColor()),
-            (true, false) => ("✓ Allowed: restart freemonplay to use it", NSColor::systemOrangeColor()),
+            (true, false) => ("✓ Allowed: restart Freemonplay to use it", NSColor::systemOrangeColor()),
             (false, _) => ("Not allowed yet", NSColor::systemOrangeColor()),
         };
         self.screen_status.setStringValue(&NSString::from_str(text));

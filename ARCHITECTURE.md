@@ -1,6 +1,6 @@
 # Architecture
 
-How freemonplay is put together, for anyone changing it. The README covers building and
+How Freemonplay is put together, for anyone changing it. The README covers building and
 using it; [CHANGELOG.md](CHANGELOG.md) covers what changed when; [BACKLOG.md](BACKLOG.md)
 covers what's next.
 
@@ -54,7 +54,7 @@ crates/
                       resolution list), system.rs (firewall rule, Run key, elevation, one
                       running copy)
     platform/unsupported.rs   stubs (and the plan) for the Linux host
-  client/   freemonplay-client: discovery, sessions, decoding, rendering, input, GUI
+  client/   freemonplay-screen: discovery, sessions, decoding, rendering, input, GUI
     app.rs            the app state machine and its windows ("displays")
     ui.rs             egui screens: host list, pairing code, connecting
     net.rs            discovery (mDNS), connecting, the session loop
@@ -276,14 +276,17 @@ refresh aren't included, so the real figure is somewhat higher.
 ## Testing
 
 - `cargo test --workspace`: protocol, address ranking, pairing, clip parsing.
-- `freemonplay-client --self-test`: real decoder and renderer, off screen; checks
+- `freemonplay-screen --self-test`: real decoder and renderer, off screen; checks
   colours, timestamps and which path ran (zero copy or copying). Works over SSH.
 - `freemonplay-host --test-pattern`: streams a generated picture, no permissions needed.
 - CI (`.github/workflows/ci.yml`) builds the Mac menu bar app, the Mac client app
   (`bundle.sh --client`), the Windows client and its Inno Setup installer
-  (`build/windows/freemonplay.iss`; the icon is embedded by `crates/client/build.rs`), the
+  (`build/windows/freemonplay-screen.iss`; the icon is embedded by `crates/client/build.rs`), the
   Windows host installer (`build/windows/freemonplay-host.iss`, bundling the Virtual Display
   Driver, pinned by version and checksum; `crates/host/build.rs` embeds the icon and a
   manifest for Common Controls 6 and per-monitor DPI awareness), and
-  the Linux client; `release.yml` publishes them for `v*` tags, with that version's
+  the Linux client. For `v*` tags, once the credentials exist, the Windows programs and
+  installers are signed through the SignPath Foundation and the Mac apps and disk images are
+  Developer ID signed and notarized (`build/macos/notarize.sh`; see SIGNING.md).
+  `release.yml` publishes them for `v*` tags, with that version's
   changelog section as the notes.

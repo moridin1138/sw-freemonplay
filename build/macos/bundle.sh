@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Builds target/freemonplay.app: the host as a menu bar app.
+# Builds "target/Freemonplay Host.app": the host as a menu bar app.
 #   ./build/macos/bundle.sh              build only
 #   ./build/macos/bundle.sh --install    build and copy to /Applications (recommended)
 #   ./build/macos/bundle.sh --universal  Apple Silicon + Intel in one binary (used for releases)
-#   ./build/macos/bundle.sh --client     the client instead: "freemonplay Screen.app", for
+#   ./build/macos/bundle.sh --client     the client instead: "Freemonplay Screen.app", for
 #                                        Macs used as screens (combines with the others)
 #
 # Run it from /Applications: macOS guards apps that live inside Documents, Desktop or
@@ -12,6 +12,8 @@
 # Signing: macOS ties Screen Recording and Accessibility permissions to the signature. With
 # the "freemonplay Local Signing" identity (create it once with make-signing-identity.sh)
 # they survive rebuilds; with the ad-hoc fallback you re-enable them after each rebuild.
+# Releases set FMP_SIGN_IDENTITY to a Developer ID Application identity: signed with the
+# hardened runtime and a secure timestamp, ready for notarize.sh.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -32,21 +34,23 @@ for arg in "$@"; do
 done
 
 if $client; then
-    package=freemonplay-client
-    name="freemonplay Screen"
-    executable=freemonplay-client
+    package=freemonplay-screen
+    name="Freemonplay Screen"
+    old_name="freemonplay Screen"
+    executable=freemonplay-screen
     bundle_id=io.github.moridin1138.freemonplay.screen
     # An ordinary app with a Dock icon and windows.
     ui_element=false
-    network_reason="freemonplay finds computers to be a screen for on your local network."
+    network_reason="Freemonplay Screen finds computers to be a screen for on your local network."
 else
     package=freemonplay-host
-    name=freemonplay
-    executable=freemonplay
+    name="Freemonplay Host"
+    old_name=Freemonplay
+    executable=freemonplay-host
     bundle_id=io.github.moridin1138.freemonplay
     # Menu bar only: no Dock icon or app menu.
     ui_element=true
-    network_reason="freemonplay finds and streams to screens on your local network."
+    network_reason="Freemonplay Host finds and streams to screens on your local network."
 fi
 app="target/$name.app"
 
@@ -106,7 +110,10 @@ cat > "$app/Contents/Info.plist" <<PLIST
 PLIST
 
 identity="freemonplay Local Signing"
-if security find-identity -p codesigning 2>/dev/null | grep -q "\"$identity\""; then
+if [ -n "${FMP_SIGN_IDENTITY:-}" ]; then
+    codesign --force --options runtime --timestamp --sign "$FMP_SIGN_IDENTITY" --identifier "$bundle_id" "$app"
+    echo "Signed with \"$FMP_SIGN_IDENTITY\" (hardened runtime)"
+elif security find-identity -p codesigning 2>/dev/null | grep -q "\"$identity\""; then
     codesign --force --sign "$identity" --identifier "$bundle_id" "$app"
     echo "Signed with \"$identity\""
 else
@@ -117,12 +124,16 @@ echo "Built $app"
 
 if $install; then
     dest="/Applications/$name.app"
-    if pgrep -xq "$executable"; then
-        echo "Quitting the running $name first"
-        pkill -x "$executable" || true
-        sleep 1
-    fi
-    rm -rf "$dest"
+    # Before 0.3 the apps were "freemonplay.app" (running as "freemonplay") and
+    # "freemonplay Screen.app".
+    for running in "$executable" freemonplay freemonplay-client; do
+        if pgrep -xq "$running"; then
+            echo "Quitting the running $running first"
+            pkill -x "$running" || true
+            sleep 1
+        fi
+    done
+    rm -rf "$dest" "/Applications/$old_name.app"
     cp -R "$app" "$dest"
     # Leave only one copy, so Spotlight and Launchpad can't open the build copy by mistake
     # (permissions and the Documents-folder prompts make that copy misbehave).

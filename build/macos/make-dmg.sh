@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Packs an app into a disk image that opens to the app beside an Applications shortcut,
 # so installing is a drag across.
-#   ./build/macos/make-dmg.sh "target/freemonplay.app" dist/freemonplay-macos.dmg
+#   ./build/macos/make-dmg.sh "target/Freemonplay Host.app" dist/freemonplay-host-macos.dmg
 set -euo pipefail
 
 app=$1

@@ -105,7 +105,7 @@ pub fn start(kvm: Arc<Kvm>) -> Result<()> {
             tracing::info!("watching the pointer for keyboard and mouse mode");
             Ok(())
         }
-        _ => bail!("couldn't watch the keyboard and mouse: allow freemonplay under Accessibility in System Settings"),
+        _ => bail!("couldn't watch the keyboard and mouse: allow Freemonplay under Accessibility in System Settings"),
     }
 }
 

@@ -27,7 +27,7 @@ use crate::welcome::{self, Welcome};
 
 const FPS_CHOICES: [u32; 4] = [30, 60, 90, 120];
 
-/// The freemonplay mark redrawn for the menu bar: a vector template image (see
+/// The Freemonplay mark redrawn for the menu bar: a vector template image (see
 /// build/macos/icon/make-menubar-icon.swift).
 const MENUBAR_ICON_PDF: &[u8] = include_bytes!("../../../build/macos/icon/menubar.pdf");
 /// Where a keyboard-and-mouse-only screen's monitors sit relative to the main display.
@@ -56,7 +56,7 @@ pub fn run(ctx: Arc<Ctx>, log: PathBuf) {
         match menubar_icon().or_else(|| {
             NSImage::imageWithSystemSymbolName_accessibilityDescription(
                 &NSString::from_str("display.2"),
-                Some(&NSString::from_str("freemonplay")),
+                Some(&NSString::from_str("Freemonplay Host")),
             )
         }) {
             Some(image) => {
@@ -340,7 +340,7 @@ impl Controller {
         if right.size.width > 0.0 && notch.contains(&mid) {
             tracing::warn!(
                 "the menu bar icon is hidden behind the notch (too many menu bar icons). Cmd-drag \
-                 other icons to make room, or open freemonplay again to show its menu at the pointer."
+                 other icons to make room, or open Freemonplay again to show its menu at the pointer."
             );
         } else {
             tracing::info!("menu bar icon at x={:.0}", frame.origin.x);
@@ -355,9 +355,9 @@ impl Controller {
         let Some(button) = item.as_ref().and_then(|i| i.button(self.mtm())) else { return };
         button.setTitle(&NSString::from_str(&if count > 0 { format!(" {count}") } else { String::new() }));
         let tip = match count {
-            0 => format!("freemonplay on {}: waiting for screens", ctx.host_name),
-            1 => format!("freemonplay on {}: 1 screen connected", ctx.host_name),
-            n => format!("freemonplay on {}: {n} screens connected", ctx.host_name),
+            0 => format!("Freemonplay on {}: waiting for screens", ctx.host_name),
+            1 => format!("Freemonplay on {}: 1 screen connected", ctx.host_name),
+            n => format!("Freemonplay on {}: {n} screens connected", ctx.host_name),
         };
         button.setToolTip(Some(&NSString::from_str(&tip)));
     }
@@ -367,7 +367,7 @@ impl Controller {
         let settings = ctx.settings();
         menu.removeAllItems();
 
-        menu.addItem(&self.item(&format!("freemonplay on {} (port {})", ctx.host_name, ctx.port), None, 0));
+        menu.addItem(&self.item(&format!("Freemonplay on {} (port {})", ctx.host_name, ctx.port), None, 0));
         let code = self.item(&format!("Pairing code: {}", ctx.store.pairing_code()), Some(sel!(copyCode:)), 0);
         code.setToolTip(Some(&NSString::from_str("Click to copy. New screens enter this code once.")));
         menu.addItem(&code);
@@ -469,7 +469,7 @@ impl Controller {
         menu.addItem(&self.item("Setup Guide…", Some(sel!(showWelcome:)), 0));
         menu.addItem(&self.item("Show Log", Some(sel!(showLog:)), 0));
         menu.addItem(&NSMenuItem::separatorItem(self.mtm()));
-        let quit = self.item("Quit freemonplay", Some(sel!(quit:)), 0);
+        let quit = self.item("Quit Freemonplay", Some(sel!(quit:)), 0);
         quit.setKeyEquivalent(&NSString::from_str("q"));
         menu.addItem(&quit);
     }
@@ -502,7 +502,7 @@ fn menubar_icon() -> Option<Retained<NSImage>> {
     let data = NSData::with_bytes(MENUBAR_ICON_PDF);
     let image = NSImage::initWithData(NSImage::alloc(), &data)?;
     image.setSize(NSSize::new(18.0, 18.0));
-    image.setAccessibilityDescription(Some(&NSString::from_str("freemonplay")));
+    image.setAccessibilityDescription(Some(&NSString::from_str("Freemonplay Host")));
     Some(image)
 }
 

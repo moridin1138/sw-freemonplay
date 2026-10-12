@@ -1,5 +1,5 @@
 ; Inno Setup script for the Windows client (a "screen"). CI compiles it with:
-;   iscc /DVersion=0.2.0 /DSource=..\..\target\release build\windows\freemonplay.iss
+;   iscc /DVersion=0.2.0 /DSource=..\..\target\release build\windows\freemonplay-screen.iss
 ; Installs for the current user only, so it never asks for administrator rights, and a
 ; newer installer simply updates in place.
 
@@ -12,19 +12,19 @@
 
 [Setup]
 AppId={{6F4C3A52-8E1D-4B7A-9C2F-3D5E8A1B4C70}
-AppName=freemonplay
+AppName=Freemonplay Screen
 AppVersion={#Version}
-AppVerName=freemonplay {#Version}
+AppVerName=Freemonplay Screen {#Version}
 AppPublisher=moridin1138
 AppPublisherURL=https://github.com/moridin1138/sw-freemonplay
 DefaultDirName={localappdata}\Programs\freemonplay
-DefaultGroupName=freemonplay
+DefaultGroupName=Freemonplay
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputBaseFilename=freemonplay-screen-windows-x64-setup
 OutputDir=..\..\dist
 SetupIconFile=icon.ico
-UninstallDisplayIcon={app}\freemonplay-client.exe
+UninstallDisplayIcon={app}\freemonplay-screen.exe
 LicenseFile=..\..\LICENSE
 Compression=lzma2
 SolidCompression=yes
@@ -38,14 +38,18 @@ CloseApplications=yes
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "{#Source}\freemonplay-client.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Source}\freemonplay-screen.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"
 Source: "..\..\README.md"; DestDir: "{app}"
 
+[InstallDelete]
+; Before 0.3 the program was freemonplay-client.exe.
+Type: files; Name: "{app}\freemonplay-client.exe"
+
 [Icons]
-Name: "{group}\freemonplay Screen"; Filename: "{app}\freemonplay-client.exe"; Comment: "Use this computer as an extra screen for a Mac"
-Name: "{group}\Uninstall freemonplay"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\freemonplay Screen"; Filename: "{app}\freemonplay-client.exe"; Tasks: desktopicon
+Name: "{group}\Freemonplay Screen"; Filename: "{app}\freemonplay-screen.exe"; Comment: "Use this computer as an extra screen for a Mac"
+Name: "{group}\Uninstall Freemonplay Screen"; Filename: "{uninstallexe}"
+Name: "{userdesktop}\Freemonplay Screen"; Filename: "{app}\freemonplay-screen.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\freemonplay-client.exe"; Description: "Start freemonplay Screen"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\freemonplay-screen.exe"; Description: "Start Freemonplay Screen"; Flags: nowait postinstall skipifsilent

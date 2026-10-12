@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the x86_64 Linux client in Docker (works from macOS, including Apple Silicon).
-# Output: target/linux-x86_64/release/freemonplay-client
+# Output: target/linux-x86_64/release/freemonplay-screen
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -17,7 +17,7 @@ docker run --rm --platform linux/amd64 \
     -v freemonplay-cargo-registry:/root/.cargo/registry \
     -e CARGO_TARGET_DIR=/src/target/linux-x86_64 \
     "$image" \
-    cargo build --release --locked -p freemonplay-client
+    cargo build --release --locked -p freemonplay-screen
 
 echo
-echo "Built target/linux-x86_64/release/freemonplay-client"
+echo "Built target/linux-x86_64/release/freemonplay-screen"

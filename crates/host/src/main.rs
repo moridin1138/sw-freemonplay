@@ -1,4 +1,4 @@
-//! freemonplay host: advertises itself on the LAN, and for every client that connects it
+//! Freemonplay host: advertises itself on the LAN, and for every client that connects it
 //! creates a virtual display matching the client's screen and streams it there.
 
 // Keyboard and mouse mode with this computer as the host is Mac only so far (and Linux has
@@ -78,7 +78,7 @@ struct Args {
     #[arg(long)]
     test_pattern: bool,
     /// Run as a menu bar (Mac) or tray (Windows) app. This is the default on Windows, and
-    /// on a Mac when launched as freemonplay.app.
+    /// on a Mac when launched as Freemonplay Host.app.
     #[arg(long, visible_alias = "tray", conflicts_with = "no_menubar")]
     menubar: bool,
     /// Run in the terminal instead of as a menu bar or tray app.
@@ -160,7 +160,7 @@ fn main() -> Result<()> {
     let result = run(args, gui);
     #[cfg(target_os = "windows")]
     if gui && let Err(e) = &result {
-        platform::system::error_box(&format!("freemonplay couldn't start: {e:#}"));
+        platform::system::error_box(&format!("Freemonplay Host couldn't start: {e:#}"));
     }
     result
 }
@@ -213,10 +213,10 @@ fn run(args: Args, gui: bool) -> Result<()> {
         *ctx.advertisement.lock().unwrap() = Some(advertise(&ctx.store.host_id, &ctx.host_name, ctx.port)?);
     }
 
-    tracing::info!("freemonplay host \"{}\" listening on UDP port {}", ctx.host_name, ctx.port);
+    tracing::info!("Freemonplay Host \"{}\" listening on UDP port {}", ctx.host_name, ctx.port);
     if !gui {
         println!();
-        println!("  freemonplay host \"{}\" listening on UDP port {}", ctx.host_name, ctx.port);
+        println!("  Freemonplay host \"{}\" listening on UDP port {}", ctx.host_name, ctx.port);
         println!("  Pairing code for new clients:  {}", ctx.store.pairing_code());
         println!("  Host fingerprint: {}", &ctx.store.cert_fingerprint()[..16]);
         println!();
@@ -271,6 +271,10 @@ fn init_logging(to_file: bool) -> Result<()> {
     if to_file {
         let path = log_path();
         std::fs::create_dir_all(path.parent().context("log path has no parent")?)?;
+        // Start over (keeping the previous log as host.old.log) once it passes 5 MB.
+        if std::fs::metadata(&path).is_ok_and(|m| m.len() > 5 << 20) {
+            let _ = std::fs::rename(&path, path.with_file_name("host.old.log"));
+        }
         let file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
         tracing_subscriber::fmt().with_env_filter(filter()).with_ansi(false).with_writer(std::sync::Mutex::new(file)).init();
     } else {
@@ -351,7 +355,7 @@ fn probe_display(size: &str) -> Result<()> {
         hidpi,
         size_mm: None,
     };
-    let display = platform::VirtualDisplay::create("freemonplay probe", 1, &req)?;
+    let display = platform::VirtualDisplay::create("Freemonplay probe", 1, &req)?;
     println!("virtual display {} is up; removing it in 3 s", display.id());
     std::thread::sleep(Duration::from_secs(3));
     Ok(())

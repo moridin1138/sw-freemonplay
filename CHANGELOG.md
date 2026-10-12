@@ -9,6 +9,17 @@ publishes it as the release notes.
 Hosts and clients must both be updated: the protocol changed (version 10).
 
 ### Changed
+- **New names: Freemonplay Host and Freemonplay Screen.** The Mac apps are now
+  "Freemonplay Host.app" (was "freemonplay.app") and "Freemonplay Screen.app", the Mac host
+  download is `freemonplay-host-macos.dmg`, and the screen's command is `freemonplay-screen`
+  (was `freemonplay-client`) on every OS. Installing a new build replaces the old copies.
+  Pairings and settings carry over.
+- **Disconnecting is easier:** move the pointer to the top edge of a screen for a toolbar
+  with the host's name, the stream's size, codec and frame rate, and Full Screen and
+  Disconnect buttons. The list then says which computer you disconnected from.
+- **Logs say more:** the screen app now keeps a log file (Show log at the bottom of its
+  window), the host logs why each session ended (closed by the screen, timed out, closed
+  from the menu), and both start a fresh file once the log passes 5 MB.
 - **A clearer client window:** the real app icon, an amber Connect button for each
   computer (with whether it's paired), the computer itself no longer listed, "Use this
   screen as: Extra screen / Keyboard and mouse only" in plain words, a larger pairing code
@@ -16,7 +27,11 @@ Hosts and clients must both be updated: the protocol changed (version 10).
   and Linux windows show the app icon too.
 
 ### Added
-- **Windows host: a tray app and an installer.** freemonplay on Windows now lives in the
+- **Release signing, ready to switch on:** tagged releases sign the Windows programs and
+  installers through the SignPath Foundation, and Developer ID sign and notarize the Mac
+  apps and disk images, once the accounts and secrets in SIGNING.md exist. The README has
+  the code signing policy.
+- **Windows host: a tray app and an installer.** Freemonplay on Windows now lives in the
   notification area, with the same menu as on a Mac: the pairing code, connected screens
   with live stats and Disconnect, the codec, frame rate, input and clipboard settings,
   Start at Sign-in, Setup Guide and the log. A setup dialog checks the display driver and
@@ -30,7 +45,7 @@ Hosts and clients must both be updated: the protocol changed (version 10).
   missing) a window walks through Screen Recording, Accessibility and connecting a first
   screen, with live status for each permission, buttons that open the right System
   Settings page, a Restart button once Screen Recording is newly allowed, the pairing code
-  with Copy Code, and a link to download freemonplay Screen. "Setup Guide…" in the menu
+  with Copy Code, and a link to download Freemonplay Screen. "Setup Guide…" in the menu
   reopens it.
 - **Windows host, preview:** a Windows PC can now get extra screens too. Each screen
   extends the desktop onto a virtual monitor at its own resolution, through the signed,

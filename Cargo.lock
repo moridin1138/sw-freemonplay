@@ -1310,7 +1310,46 @@ dependencies = [
 ]
 
 [[package]]
-name = "freemonplay-client"
+name = "freemonplay-host"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "block2 0.6.2",
+ "clap",
+ "directories",
+ "dispatch2",
+ "fmp-proto",
+ "mdns-sd",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-core-media",
+ "objc2-core-video",
+ "objc2-core-wlan",
+ "objc2-foundation 0.3.2",
+ "objc2-screen-capture-kit",
+ "objc2-service-management",
+ "objc2-video-toolbox",
+ "openh264",
+ "png",
+ "quinn",
+ "rand 0.9.5",
+ "rcgen",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "socket2",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "windows",
+ "winresource",
+]
+
+[[package]]
+name = "freemonplay-screen"
 version = "0.2.0"
 dependencies = [
  "anyhow",
@@ -1352,45 +1391,6 @@ dependencies = [
  "winit",
  "winresource",
  "zbus",
-]
-
-[[package]]
-name = "freemonplay-host"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "arboard",
- "block2 0.6.2",
- "clap",
- "directories",
- "dispatch2",
- "fmp-proto",
- "mdns-sd",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-core-foundation",
- "objc2-core-media",
- "objc2-core-video",
- "objc2-core-wlan",
- "objc2-foundation 0.3.2",
- "objc2-screen-capture-kit",
- "objc2-service-management",
- "objc2-video-toolbox",
- "openh264",
- "png",
- "quinn",
- "rand 0.9.5",
- "rcgen",
- "rustls",
- "serde",
- "serde_json",
- "sha2",
- "socket2",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "windows",
- "winresource",
 ]
 
 [[package]]

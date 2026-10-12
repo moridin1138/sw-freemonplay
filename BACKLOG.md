@@ -31,6 +31,6 @@ Roughly in priority order. Done items move to [CHANGELOG.md](CHANGELOG.md).
 
 ## Distribution
 
-- **Sign and notarize the Mac apps** (Apple Developer Program, about US$99 a year): no Gatekeeper warning, and permissions survive updates for everyone. Sign with the hardened runtime, notarize with `notarytool`, staple, all in release.yml with the certificate and an App Store Connect API key as secrets. The disk images get signed too.
-- **Sign the Windows installer and client** to remove SmartScreen's warning: SignPath Foundation (free for open source), or Microsoft's Azure signing service (about US$10 a month).
+- **Signing: accounts.** The workflows are ready (see SIGNING.md) and skip signing until the accounts exist: apply to the SignPath Foundation (Windows; also needed for Smart App Control, which blocked an unsigned host build on the Surface), and join the Apple Developer Program (US$99 a year) for Developer ID signing and notarization. Then test a tagged release end to end.
+- **Sign the Windows uninstallers** (Inno Setup's `SignedUninstaller` plus one more signing step).
 - A disk image background with an arrow, if wanted (needs Finder layout, awkward on CI).

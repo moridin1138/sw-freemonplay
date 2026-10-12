@@ -1,6 +1,6 @@
 [package]
 name = "freemonplay-host"
-description = "Creates virtual displays and streams them to freemonplay clients"
+description = "Creates virtual displays and streams them to Freemonplay clients"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

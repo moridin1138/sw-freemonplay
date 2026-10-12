@@ -33,11 +33,11 @@ use crate::encoder::CodecChoice;
 use crate::platform::{display, system};
 use crate::session::Ctx;
 
-/// The window class; a second copy of freemonplay finds the running one by it.
+/// The window class; a second copy of Freemonplay finds the running one by it.
 pub const CLASS: PCWSTR = w!("FreemonplayTray");
 /// Tray icon events.
 const WM_TRAY: u32 = WM_APP + 1;
-/// Show the setup dialog (posted at launch, and by a second copy of freemonplay).
+/// Show the setup dialog (posted at launch, and by a second copy of Freemonplay).
 pub const WM_SHOW_SETUP: u32 = WM_APP + 2;
 /// Version 4 tray events: a click or Enter on the icon.
 const NIN_SELECT: u32 = WM_USER;
@@ -95,7 +95,7 @@ pub fn run(ctx: Arc<Ctx>, log: PathBuf) {
         let hwnd = match CreateWindowExW(
             WINDOW_EX_STYLE(0),
             CLASS,
-            w!("freemonplay"),
+            w!("Freemonplay Host"),
             WS_OVERLAPPED,
             0,
             0,
@@ -108,7 +108,7 @@ pub fn run(ctx: Arc<Ctx>, log: PathBuf) {
         ) {
             Ok(hwnd) => hwnd,
             Err(e) => {
-                system::error_box(&format!("freemonplay couldn't start its tray icon: {e}"));
+                system::error_box(&format!("Freemonplay Host couldn't start its tray icon: {e}"));
                 return;
             }
         };
@@ -232,9 +232,9 @@ impl Tray {
     fn tip(&self) -> String {
         let ctx = &self.ctx;
         match ctx.registry.len() {
-            0 => format!("freemonplay on {}: waiting for screens", ctx.host_name),
-            1 => format!("freemonplay on {}: 1 screen connected", ctx.host_name),
-            n => format!("freemonplay on {}: {n} screens connected", ctx.host_name),
+            0 => format!("Freemonplay on {}: waiting for screens", ctx.host_name),
+            1 => format!("Freemonplay on {}: 1 screen connected", ctx.host_name),
+            n => format!("Freemonplay on {}: {n} screens connected", ctx.host_name),
         }
     }
 
@@ -248,7 +248,7 @@ impl Tray {
         let settings = ctx.settings();
         let mut menu = Menu::new();
 
-        menu.info(&format!("freemonplay on {} (port {})", ctx.host_name, ctx.port));
+        menu.info(&format!("Freemonplay on {} (port {})", ctx.host_name, ctx.port));
         menu.item(&format!("Pairing code: {} (click to copy)", format_code(&ctx.store.pairing_code())), Action::CopyCode, false);
         menu.separator();
 
@@ -296,7 +296,7 @@ impl Tray {
         menu.item("Setup Guide…", Action::Setup, false);
         menu.item("Show Log", Action::ShowLog, false);
         menu.separator();
-        menu.item("Quit freemonplay", Action::Quit, false);
+        menu.item("Quit Freemonplay", Action::Quit, false);
 
         let mut at = POINT::default();
         // SAFETY: showing our popup menu at the pointer. Windows needs our window in front
@@ -380,7 +380,7 @@ impl Tray {
                 "This PC gets extra screens: other computers and tablets on your network show them over Wi-Fi or Ethernet.\n\n\
                  1. Display driver: {}\n\
                  2. Windows Firewall: {}\n\
-                 3. Connect a screen: on the other device, install freemonplay Screen, open it and pick this PC. \
+                 3. Connect a screen: on the other device, install Freemonplay Screen, open it and pick this PC. \
                  The first time, it asks for the pairing code {code}.",
                 if driver {
                     "✓ Installed"
@@ -406,20 +406,20 @@ impl Tray {
                 buttons.push((FIREWALL, "Let screens through Windows Firewall\nWindows asks for administrator rights once.".into()));
             }
             buttons.push((COPY, format!("Copy the pairing code\n{code}").into()));
-            buttons.push((DOWNLOAD, "Get freemonplay Screen for the other devices\nOpens the download page.".into()));
+            buttons.push((DOWNLOAD, "Get Freemonplay Screen for the other devices\nOpens the download page.".into()));
             let raw: Vec<TASKDIALOG_BUTTON> =
                 buttons.iter().map(|(id, text)| TASKDIALOG_BUTTON { nButtonID: *id, pszButtonText: PCWSTR(text.as_ptr()) }).collect();
             let content = HSTRING::from(content);
             let footer = HSTRING::from(
-                "freemonplay stays in the notification area by the clock (under the ^ arrow if it's hidden). Setup Guide… in its menu reopens this.",
+                "Freemonplay stays in the notification area by the clock (under the ^ arrow if it's hidden). Setup Guide… in its menu reopens this.",
             );
             let config = TASKDIALOGCONFIG {
                 cbSize: size_of::<TASKDIALOGCONFIG>() as u32,
                 dwFlags: TDF_USE_COMMAND_LINKS | TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION,
                 dwCommonButtons: TDCBF_CLOSE_BUTTON,
-                pszWindowTitle: w!("Welcome to freemonplay"),
+                pszWindowTitle: w!("Welcome to Freemonplay"),
                 Anonymous1: TASKDIALOGCONFIG_0 { hMainIcon: self.big_icon },
-                pszMainInstruction: w!("Set up freemonplay"),
+                pszMainInstruction: w!("Set up Freemonplay"),
                 pszContent: PCWSTR(content.as_ptr()),
                 cButtons: raw.len() as u32,
                 pButtons: raw.as_ptr(),

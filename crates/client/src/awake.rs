@@ -7,7 +7,7 @@ pub struct KeepAwake(#[allow(dead_code)] imp::Inner);
 
 impl KeepAwake {
     pub fn start() -> Option<Self> {
-        match imp::Inner::start("Showing a screen from another computer (freemonplay)") {
+        match imp::Inner::start("Showing a screen from another computer (Freemonplay)") {
             Ok(inner) => {
                 tracing::info!("keeping this screen awake while connected");
                 Some(Self(inner))
@@ -102,7 +102,7 @@ mod imp {
                     "/org/freedesktop/ScreenSaver",
                     "org.freedesktop.ScreenSaver",
                 )?;
-                proxy.call("Inhibit", &("freemonplay", reason))
+                proxy.call("Inhibit", &("Freemonplay Screen", reason))
             };
             let gnome = || -> zbus::Result<u32> {
                 let proxy = Proxy::new(
@@ -111,7 +111,7 @@ mod imp {
                     "/org/gnome/SessionManager",
                     "org.gnome.SessionManager",
                 )?;
-                proxy.call("Inhibit", &("freemonplay", 0u32, reason, GNOME_INHIBIT_IDLE))
+                proxy.call("Inhibit", &("Freemonplay Screen", 0u32, reason, GNOME_INHIBIT_IDLE))
             };
             let release = match screensaver() {
                 Ok(cookie) => Release::ScreenSaver(cookie),

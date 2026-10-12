@@ -159,8 +159,12 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     let conn = incoming.await?;
     let (mut send, mut recv) = match timeout(HANDSHAKE_TIMEOUT, conn.accept_bi()).await {
         Ok(Ok(stream)) => stream,
-        // The client hung up on purpose before starting (e.g. to ask the user for the code).
-        Ok(Err(quinn::ConnectionError::ApplicationClosed(_))) => return Ok(()),
+        // The client hung up on purpose before starting (e.g. to ask the user for the code,
+        // or it reached us on another address first).
+        Ok(Err(quinn::ConnectionError::ApplicationClosed(close))) => {
+            tracing::info!("{}: closed before starting a session ({})", conn.remote_address(), String::from_utf8_lossy(&close.reason));
+            return Ok(());
+        }
         Ok(Err(e)) => return Err(e.into()),
         Err(_) => bail!("client connected but didn't start a session within {} s", HANDSHAKE_TIMEOUT.as_secs()),
     };
@@ -245,7 +249,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     let mut source = if ctx.test_pattern {
         Source::Pattern(Pattern::start(width, height, fps, slot.clone()))
     } else {
-        let display_name = format!("freemonplay: {screen_name}");
+        let display_name = format!("Freemonplay: {screen_name}");
         let serial = match &hello.screen {
             Some(screen) => serial_for(&format!("{}/{}", hello.client_id, screen.key)),
             None => serial_for(&hello.client_id),
@@ -393,7 +397,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         tokio::time::sleep(Duration::from_secs(3)).await;
         if !slot.has_frame() {
             let message = if cfg!(target_os = "macos") {
-                "no frames are being captured. Check that freemonplay (or the terminal running \
+                "no frames are being captured. Check that Freemonplay (or the terminal running \
                  it) has Screen Recording permission in System Settings > Privacy & Security > \
                  Screen & System Audio Recording, then restart it. If it's already on, remove \
                  the entry and allow it again: it may belong to an older build."
@@ -427,7 +431,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         r = receive_images(&conn, &ctx, session.id()) => r,
         _ = conn.closed() => Ok(()),
     };
-    tracing::debug!("{who}: session ended; cleaning up");
+    tracing::info!("{who}: session ended: {}", end_reason(&conn, &result));
     ctx.kvm.unregister(session.id());
     ctx.clipboard.unregister(session.id());
 
@@ -565,9 +569,23 @@ async fn input_only(
         r = receive_images(&conn, ctx, session.id()) => r,
         _ = conn.closed() => Ok(()),
     };
+    tracing::info!("{name} ({}): session ended: {}", conn.remote_address(), end_reason(&conn, &result));
     ctx.kvm.unregister(session.id());
     ctx.clipboard.unregister(session.id());
     result
+}
+
+/// Why a session ended, for the log.
+fn end_reason(conn: &quinn::Connection, result: &Result<()>) -> String {
+    use quinn::ConnectionError as E;
+    match (conn.close_reason(), result) {
+        (Some(E::ApplicationClosed(close)), _) => format!("closed by the screen ({})", String::from_utf8_lossy(&close.reason)),
+        (Some(E::LocallyClosed), _) => "closed by this host (Disconnect in the menu, or quitting)".into(),
+        (Some(E::TimedOut), _) => "the screen stopped answering for 10 s (network lost, asleep or quit)".into(),
+        (Some(e), _) => format!("connection lost: {e}"),
+        (None, Err(e)) => format!("{e:#}"),
+        (None, Ok(())) => "finished".into(),
+    }
 }
 
 /// Creates the client's virtual display and starts capturing it.

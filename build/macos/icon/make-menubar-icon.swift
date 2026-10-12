@@ -1,4 +1,4 @@
-// Draws the menu bar version of the freemonplay mark as a vector PDF template image
+// Draws the menu bar version of the Freemonplay mark as a vector PDF template image
 // (black on transparent; macOS tints it for light/dark menu bars and highlighting).
 // Usage: swift make-menubar-icon.swift menubar.pdf [preview.png]
 //

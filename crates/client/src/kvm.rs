@@ -385,7 +385,7 @@ mod imp {
             if !unsafe { CGPreflightPostEventAccess() } {
                 unsafe { CGRequestPostEventAccess() };
                 tracing::warn!(
-                    "the host's keyboard and mouse need the Accessibility permission: allow freemonplay-client \
+                    "the host's keyboard and mouse need the Accessibility permission: allow freemonplay-screen \
                      (or the terminal running it) in System Settings > Privacy & Security > Accessibility"
                 );
             }

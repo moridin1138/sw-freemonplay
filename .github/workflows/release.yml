@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     uses: ./.github/workflows/ci.yml
+    # Signing credentials (see SIGNING.md); builds stay unsigned while they're missing.
+    secrets: inherit
 
   release:
     needs: build
@@ -26,14 +28,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > notes.md <<'EOF'
-          **Mac (the computer that wants more screens):** open `freemonplay-macos.dmg` and drag freemonplay to Applications. The first time, right-click it and choose Open (it isn't notarized by Apple yet).
+          **Mac (the computer that wants more screens):** open `freemonplay-host-macos.dmg` and drag Freemonplay Host to Applications. If macOS says it can't check the app for malicious software, right-click it and choose Open.
 
-          **Windows PC (preview, the computer that wants more screens):** run `freemonplay-host-windows-x64-setup.exe`. It asks for administrator rights once, to install the Virtual Display Driver (so screens extend the desktop) and a firewall rule. freemonplay then lives in the notification area by the clock.
+          **Windows PC (preview, the computer that wants more screens):** run `freemonplay-host-windows-x64-setup.exe`. It asks for administrator rights once, to install the Virtual Display Driver (so screens extend the desktop) and a firewall rule. Freemonplay Host then lives in the notification area by the clock.
 
           **Screens:** on each device that should become a screen (or take the Mac's keyboard and mouse):
-          - **Windows:** run `freemonplay-screen-windows-x64-setup.exe` (no administrator rights needed; a newer one updates in place). SmartScreen may warn because it isn't signed; choose More info, then Run anyway. `freemonplay-screen-windows-x64.zip` is the same program without an installer.
-          - **Mac:** open `freemonplay-screen-macos.dmg`, drag freemonplay Screen to Applications, and right-click > Open the first time.
-          - **Linux:** unpack `freemonplay-screen-linux-x86_64.tar.gz` and run `freemonplay-client` (the `.desktop` file adds it to the app menu). It needs GStreamer's plugins: `sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-libav` (plus `intel-media-va-driver` for Intel GPU decoding).
+          - **Windows:** run `freemonplay-screen-windows-x64-setup.exe` (no administrator rights needed; a newer one updates in place). If SmartScreen warns about an unrecognised app (new releases take a while to build a reputation), choose More info, then Run anyway. `freemonplay-screen-windows-x64.zip` is the same program without an installer.
+          - **Mac:** open `freemonplay-screen-macos.dmg`, and drag Freemonplay Screen to Applications.
+          - **Linux:** unpack `freemonplay-screen-linux-x86_64.tar.gz` and run `freemonplay-screen` (the `.desktop` file adds it to the app menu). It needs GStreamer's plugins: `sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-libav` (plus `intel-media-va-driver` for Intel GPU decoding).
+
+          [Code signing policy](https://github.com/moridin1138/sw-freemonplay#code-signing-policy)
           EOF
           # This version's section of CHANGELOG.md (from "## [x.y.z]" to the next "## [").
           version="${GITHUB_REF_NAME#v}"
@@ -49,6 +53,6 @@ jobs:
           fi
           gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "freemonplay $GITHUB_REF_NAME" \
+            --title "Freemonplay $GITHUB_REF_NAME" \
             --notes-file notes.md \
             --generate-notes

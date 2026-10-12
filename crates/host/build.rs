@@ -35,8 +35,8 @@ fn main() {
     // Icon id 1: the tray icon and the setup dialog load it from here.
     res.set_icon_with_id("../../build/windows/icon.ico", "1")
         .set_manifest(MANIFEST)
-        .set("ProductName", "freemonplay")
-        .set("FileDescription", "freemonplay host")
+        .set("ProductName", "Freemonplay")
+        .set("FileDescription", "Freemonplay Host")
         .set("LegalCopyright", "Copyright (C) 2026 moridin1138. GPL-3.0-or-later.");
     // The setup dialog needs the manifest (TaskDialogIndirect is only in Common Controls 6),
     // so unlike the client a missing resource compiler is an error here.

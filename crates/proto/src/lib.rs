@@ -1,4 +1,4 @@
-//! Wire protocol shared by the freemonplay host and client.
+//! Wire protocol shared by the Freemonplay host and client.
 //!
 //! One QUIC connection per screen:
 //! - The client opens a bidirectional **control stream**. It sends [`ClientMsg::Hello`]

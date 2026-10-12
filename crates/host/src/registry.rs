@@ -127,7 +127,7 @@ impl Registry {
         let mut sessions = self.sessions.lock().unwrap();
         sessions.insert(id, Entry { info, conn });
         if sessions.len() == 1 {
-            *self.activity.lock().unwrap() = Some(Activity::begin("streaming to freemonplay screens"));
+            *self.activity.lock().unwrap() = Some(Activity::begin("streaming to Freemonplay screens"));
         }
         SessionGuard { registry: self.clone(), id }
     }

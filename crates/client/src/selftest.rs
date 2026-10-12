@@ -22,7 +22,7 @@ const BARS: [(&str, [u8; 3]); 4] =
 const TOLERANCE: i32 = 40;
 
 pub fn run() -> Result<()> {
-    println!("freemonplay self-test: decode and draw a test clip with this machine's GPU\n");
+    println!("Freemonplay Screen self-test: decode and draw a test clip with this machine's GPU\n");
     let mut failures = 0;
     for zero_copy in [true, false] {
         if !zero_copy {

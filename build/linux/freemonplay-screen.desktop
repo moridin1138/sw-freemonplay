@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=freemonplay Screen
+Name=Freemonplay Screen
 Comment=Use this computer as an extra screen for a Mac
 # Adjust both paths to where you unpacked it, then copy this file to
 # ~/.local/share/applications/ to add it to the app menu.
-Exec=/opt/freemonplay-screen/freemonplay-client
+Exec=/opt/freemonplay-screen/freemonplay-screen
 Icon=/opt/freemonplay-screen/freemonplay.png
 Categories=Utility;Network;
 Terminal=false

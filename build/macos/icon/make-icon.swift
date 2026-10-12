@@ -1,4 +1,4 @@
-// Draws the freemonplay app icon (1024x1024 PNG) with CoreGraphics.
+// Draws the Freemonplay app icon (1024x1024 PNG) with CoreGraphics.
 // Usage: swift make-icon.swift out.png [graphite|sunset|emerald]   (graphite is the app icon)
 //
 // Plain shapes only: Apple's SF Symbols license doesn't allow symbols in app icons.

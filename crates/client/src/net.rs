@@ -171,7 +171,7 @@ fn no_answer_message(target: &Target) -> String {
         )
     } else {
         format!(
-            "no answer from {at}. Check that freemonplay is running there and the address is \
+            "no answer from {at}. Check that Freemonplay is running there and the address is \
              right. If it is, something on the network may be blocking traffic between the two \
              computers (Wi-Fi client isolation, a guest network or a firewall)."
         )
@@ -580,7 +580,7 @@ mod tests {
         let found = Target { name: "mac".into(), addrs: addrs.clone(), id: Some("id".into()) };
         let typed = Target { name: "192.168.0.88".into(), addrs, id: None };
         assert!(no_answer_message(&found).starts_with("mac is on the network but didn't answer at 192.168.0.88."));
-        assert!(no_answer_message(&typed).contains("Check that freemonplay is running"));
+        assert!(no_answer_message(&typed).contains("Check that Freemonplay is running"));
     }
 
     #[test]
