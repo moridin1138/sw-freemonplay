@@ -6,14 +6,18 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use fmp_proto::{ClientStats, Codec, NetworkInfo};
+use fmp_proto::{ClientStats, Codec, Edge, NetworkInfo};
 
 use crate::platform::Activity;
 
 #[derive(Clone, Debug)]
 pub struct SessionInfo {
     pub id: u64,
+    /// The client's stable id (per computer, shared by its monitors).
+    pub client_id: String,
     pub client_name: String,
+    /// Keyboard and mouse mode, if the session offers it.
+    pub kvm: Option<KvmRole>,
     pub addr: SocketAddr,
     pub width: u32,
     pub height: u32,
@@ -57,6 +61,17 @@ pub struct Registry {
 }
 
 impl Registry {
+    pub fn set_kvm(&self, id: u64, role: KvmRole) {
+        if let Some(entry) = self.sessions.lock().unwrap().get_mut(&id) {
+            entry.info.kvm = Some(role);
+        }
+    }
+
+    /// The session's client id, for settings saved per computer.
+    pub fn client_id(&self, id: u64) -> Option<String> {
+        self.sessions.lock().unwrap().get(&id).map(|e| e.info.client_id.clone())
+    }
+
     /// Adds a session; it's removed again when the returned guard drops.
     pub fn add(self: &Arc<Self>, mut info: SessionInfo, conn: quinn::Connection) -> SessionGuard {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -90,7 +105,24 @@ pub struct SessionGuard {
     id: u64,
 }
 
+/// How a session's keyboard and mouse monitors connect to this computer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KvmRole {
+    /// Around the screen it streams.
+    Mixed,
+    /// Keyboard and mouse only, on this side of the main display.
+    Beside(Edge),
+}
+
 impl SessionGuard {
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub fn set_kvm(&self, role: KvmRole) {
+        self.update(|info| info.kvm = Some(role));
+    }
+
     pub fn update_stats(&self, fps: f32, mbps: f32, host_ms: f32, rtt_ms: f32) {
         self.update(|info| {
             info.fps = fps;

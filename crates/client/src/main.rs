@@ -11,6 +11,7 @@ mod app;
 mod awake;
 mod decode;
 mod input;
+mod kvm;
 mod link;
 mod net;
 mod render;
@@ -48,6 +49,10 @@ struct Args {
     /// Use all of this computer's monitors, each as a separate screen on the host.
     #[arg(long)]
     all_monitors: bool,
+    /// Keyboard and mouse only: no screens; the host's keyboard and mouse control all of
+    /// this computer's monitors (Windows for now).
+    #[arg(long, conflicts_with = "all_monitors")]
+    keyboard_mouse: bool,
     /// Stream in a window of this size (e.g. 1280x800) instead of full screen.
     #[arg(long, value_name = "WxH")]
     windowed: Option<String>,
@@ -124,14 +129,23 @@ fn main() -> Result<()> {
         store,
         hosts,
         args.name.clone().unwrap_or_else(hostname),
-        app::Startup { monitor: args.monitor, all_monitors: args.all_monitors, windowed, host: args.host, code: args.code },
+        app::Startup {
+            monitor: args.monitor,
+            all_monitors: args.all_monitors,
+            keyboard_mouse: args.keyboard_mouse,
+            windowed,
+            host: args.host,
+            code: args.code,
+        },
         ui::Options {
             fullscreen: windowed.is_none(),
             scale: args.scale,
             vsync: !args.no_vsync,
             codec: args.codec,
             keep_awake: !args.allow_sleep,
-            extra_monitors: Default::default(),
+            main_role: ui::Role::Screen,
+            roles: Default::default(),
+            swap_command_control: true,
         },
     );
     event_loop.run_app(&mut app)?;

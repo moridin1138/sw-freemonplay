@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use fmp_proto::{
     ALPN, Auth, ClientMsg, Codec, DEFAULT_PORT, DisplayRequest, Hello, HostMsg, PROTOCOL_VERSION, RejectKind,
-    SERVICE_TYPE, ScreenId, VideoFrame, pairing,
+    KvmLayout, SERVICE_TYPE, ScreenId, VideoFrame, pairing,
     read_msg, write_msg,
 };
 use rustls::DigitallySignedStruct;
@@ -21,7 +21,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::decode::{self, FrameSlot};
 use crate::store::{self, ClientStore, hex};
-use crate::UserEvent;
+use crate::{UserEvent, kvm};
 
 #[derive(Clone)]
 pub struct Target {
@@ -310,6 +310,13 @@ pub struct Session {
     pub view: usize,
     /// Which monitor, when the client uses several (`None`: the main one).
     pub screen: Option<ScreenId>,
+    /// Keyboard and mouse mode: monitors the host's keyboard and mouse may move onto, with
+    /// each one's pixels per host point, and whether Command acts as Ctrl.
+    pub kvm: Option<(KvmLayout, Vec<f64>, bool)>,
+    /// No screen, only keyboard and mouse.
+    pub input_only: bool,
+    /// Set while the host's keyboard and mouse are here.
+    pub host_in_control: Arc<std::sync::atomic::AtomicBool>,
     pub connected: Connected,
     pub credentials: Credentials,
     pub client_name: String,
@@ -346,6 +353,8 @@ pub async fn run(mut s: Session) -> Result<String> {
         display,
         codecs: s.codecs.clone(),
         screen: s.screen.clone(),
+        kvm: s.kvm.as_ref().map(|(layout, _, _)| layout.clone()),
+        input_only: s.input_only,
     };
     write_msg(&mut send, &ClientMsg::Hello(hello)).await?;
 
@@ -377,6 +386,7 @@ pub async fn run(mut s: Session) -> Result<String> {
         }
         Some(HostMsg::Notice { message }) => bail!("unexpected notice before welcome: {message}"),
         Some(HostMsg::PairingChallenge { .. }) => bail!("host asked to pair twice"),
+        Some(_) => bail!("unexpected message from the host before its welcome"),
         None => bail!("host closed the connection during the handshake"),
     };
     if let Some(token) = &welcome.issued_token {
@@ -391,22 +401,23 @@ pub async fn run(mut s: Session) -> Result<String> {
         codec: welcome.codec,
     });
 
-    let mut video = conn.accept_uni().await?;
     // Small queue: if decoding can't keep up we'd rather skip ahead to a keyframe than lag.
     let (frame_tx, frame_rx) = std_mpsc::sync_channel::<(VideoFrame, Instant)>(4);
-    let (ready_tx, ready_rx) = oneshot::channel();
-    {
+    let mut video = None;
+    if !s.input_only {
+        video = Some(conn.accept_uni().await?);
+        let (ready_tx, ready_rx) = oneshot::channel();
         let (frames, proxy, tx) = (s.frames.clone(), s.proxy.clone(), s.outgoing_tx.clone());
         let (codec, gpu_adapter, view) = (welcome.codec, s.gpu_adapter, s.view);
         std::thread::Builder::new()
             .name("decoder".into())
             .spawn(move || decode::run(view, codec, frame_rx, frames, proxy, &tx, ready_tx, gpu_adapter))?;
-    }
-    // Let video wait in the network buffer until the decoder can take it, rather than
-    // discarding frames (and asking for keyframes) while it starts up. If it failed to
-    // start, it has already told the UI why.
-    if ready_rx.await.is_err() {
-        return Ok("decoder failed to start".into());
+        // Let video wait in the network buffer until the decoder can take it, rather than
+        // discarding frames (and asking for keyframes) while it starts up. If it failed to
+        // start, it has already told the UI why.
+        if ready_rx.await.is_err() {
+            return Ok("decoder failed to start".into());
+        }
     }
 
     // Capture-to-arrival offsets this reporting window (host and client clocks differ, so
@@ -414,8 +425,10 @@ pub async fn run(mut s: Session) -> Result<String> {
     let transit = Mutex::new(Vec::<i64>::new());
     let clock = Instant::now();
     let reader = async {
+        // Keyboard and mouse only: no video to read.
+        let Some(video) = video.as_mut() else { std::future::pending::<()>().await; return anyhow::Ok(()) };
         let mut waiting_for_keyframe = false;
-        while let Some(frame) = read_msg::<VideoFrame>(&mut video).await? {
+        while let Some(frame) = read_msg::<VideoFrame>(video).await? {
             transit.lock().unwrap().push(clock.elapsed().as_micros() as i64 - frame.pts_us as i64);
             if waiting_for_keyframe && !frame.keyframe {
                 continue;
@@ -444,11 +457,22 @@ pub async fn run(mut s: Session) -> Result<String> {
         }
         anyhow::Ok(())
     };
+    let mut remote =
+        s.kvm.take().map(|(layout, scales, swap)| kvm::Remote::new(layout, scales, swap, s.host_in_control.clone()));
     let notices = async {
         while let Some(msg) = read_msg::<HostMsg>(&mut recv).await? {
-            if let HostMsg::Notice { message } = msg {
-                tracing::warn!("host says: {message}");
-                eprintln!("Host says: {message}");
+            match msg {
+                HostMsg::Notice { message } => {
+                    tracing::warn!("host says: {message}");
+                    eprintln!("Host says: {message}");
+                }
+                msg => {
+                    if let Some(remote) = &mut remote {
+                        for reply in remote.handle(&msg) {
+                            let _ = s.outgoing_tx.send(reply);
+                        }
+                    }
+                }
             }
         }
         // The host finished its side of the control stream; video may still be flowing.

@@ -1,7 +1,10 @@
 //! User settings that the menu bar app changes and that persist between launches.
 //! Command line flags override them for that run only.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+use fmp_proto::Edge;
 
 use serde::{Deserialize, Serialize};
 
@@ -15,11 +18,14 @@ pub struct Settings {
     pub max_fps: u32,
     /// Apply mouse, keyboard and touch from clients.
     pub allow_input: bool,
+    /// Keyboard and mouse mode: which side of the main display each client's monitors sit
+    /// on, by client id (default: right).
+    pub kvm_sides: BTreeMap<String, Edge>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { codec: CodecChoice::Auto, max_fps: 60, allow_input: true }
+        Self { codec: CodecChoice::Auto, max_fps: 60, allow_input: true, kvm_sides: BTreeMap::new() }
     }
 }
 

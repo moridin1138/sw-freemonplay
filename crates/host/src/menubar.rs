@@ -18,7 +18,10 @@ use objc2_app_kit::{
 use objc2_foundation::{NSData, NSObject, NSObjectProtocol, NSSize, NSString, NSTimer, NSURL};
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
+use fmp_proto::Edge;
+
 use crate::encoder::CodecChoice;
+use crate::registry::KvmRole;
 use crate::session::Ctx;
 
 const FPS_CHOICES: [u32; 4] = [30, 60, 90, 120];
@@ -26,6 +29,14 @@ const FPS_CHOICES: [u32; 4] = [30, 60, 90, 120];
 /// The freemonplay mark redrawn for the menu bar: a vector template image (see
 /// build/macos/icon/make-menubar-icon.swift).
 const MENUBAR_ICON_PDF: &[u8] = include_bytes!("../../../build/macos/icon/menubar.pdf");
+/// Where a keyboard-and-mouse-only screen's monitors sit relative to the main display.
+const KVM_SIDES: [(Edge, &str); 4] = [
+    (Edge::Right, "Right of the main display"),
+    (Edge::Left, "Left of the main display"),
+    (Edge::Top, "Above the main display"),
+    (Edge::Bottom, "Below the main display"),
+];
+
 const CODEC_CHOICES: [(CodecChoice, &str); 3] =
     [(CodecChoice::Auto, "Automatic"), (CodecChoice::H264, "H.264"), (CodecChoice::H265, "HEVC")];
 
@@ -135,6 +146,15 @@ define_class!(
         #[unsafe(method(disconnect:))]
         fn disconnect(&self, sender: &NSMenuItem) {
             self.ivars().ctx.registry.disconnect(sender.tag() as u64);
+        }
+
+        /// Tag: session id * 4 + index into `KVM_SIDES`.
+        #[unsafe(method(setKvmSide:))]
+        fn set_kvm_side(&self, sender: &NSMenuItem) {
+            let tag = sender.tag() as u64;
+            if let Some(&(side, _)) = KVM_SIDES.get((tag % 4) as usize) {
+                self.ivars().ctx.set_kvm_side(tag / 4, side);
+            }
         }
 
         #[unsafe(method(setCodec:))]
@@ -319,6 +339,24 @@ impl Controller {
                     details.addItem(&note);
                 }
                 _ => details.addItem(&self.item("Latency: waiting for the screen's first report", None, 0)),
+            }
+            match s.kvm {
+                Some(KvmRole::Mixed) => {
+                    details.addItem(&NSMenuItem::separatorItem(self.mtm()));
+                    details.addItem(&self.item("Keyboard and mouse: move off this screen's edges onto that computer's other monitors", None, 0));
+                    details.addItem(&self.item("    Ctrl+Alt+Shift+K brings them back", None, 0));
+                }
+                Some(KvmRole::Beside(current)) => {
+                    details.addItem(&NSMenuItem::separatorItem(self.mtm()));
+                    details.addItem(&self.item("Keyboard and mouse: its monitors sit", None, 0));
+                    for (i, (side, label)) in KVM_SIDES.iter().enumerate() {
+                        let item = self.item(&format!("    {label}"), Some(sel!(setKvmSide:)), (s.id * 4 + i as u64) as isize);
+                        item.setState(if current == *side { NSControlStateValueOn } else { NSControlStateValueOff });
+                        details.addItem(&item);
+                    }
+                    details.addItem(&self.item("    Ctrl+Alt+Shift+K brings them back", None, 0));
+                }
+                None => {}
             }
             details.addItem(&NSMenuItem::separatorItem(self.mtm()));
             details.addItem(&self.item("Disconnect", Some(sel!(disconnect:)), s.id as isize));

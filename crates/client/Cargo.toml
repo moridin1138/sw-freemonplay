@@ -41,7 +41,10 @@ gstreamer-app = "0.25"
 gstreamer-video = "0.25"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+arboard = { version = "3", default-features = false }
 windows = { version = "0.62", features = [
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",
     "Win32_NetworkManagement_WiFi",

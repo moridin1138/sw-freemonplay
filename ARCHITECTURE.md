@@ -28,6 +28,7 @@ crates/
   proto/    fmp-proto: wire protocol shared by both sides (messages, framing, pairing)
   host/     freemonplay-host: mDNS advert, QUIC server, sessions, menu bar app
     session.rs        one connection: handshake, pairing, display, encode loop, input
+    kvm.rs            keyboard and mouse mode: links, edge geometry, handing control over
     rate.rs           adaptive bitrate and the send window
     registry.rs       live sessions, for the menu bar (stats, Disconnect)
     store.rs          host id, pairing code, paired clients (token hashes)
@@ -35,7 +36,8 @@ crates/
     frame.rs          FrameSlot: newest-frame-wins handoff from capture to encoder
     menubar.rs        the macOS menu bar app (objc2-app-kit)
     platform/macos/   virtual_display.rs, capture.rs, videotoolbox.rs, input.rs,
-                      network.rs (this Mac's Wi-Fi, via CoreWLAN)
+                      network.rs (this Mac's Wi-Fi, via CoreWLAN),
+                      kvm.rs (event tap: watch the pointer, capture and forward input)
     platform/unsupported.rs   stubs (and the plan) for Windows and Linux hosts
   client/   freemonplay-client: discovery, sessions, decoding, rendering, input, GUI
     app.rs            the app state machine and its windows ("displays")
@@ -48,6 +50,7 @@ crates/
     render_d3d12.rs   Windows zero copy: shared D3D textures in wgpu's D3D12 device
     awake.rs          keep the screen on while connected
     link.rs           the network link: Wi-Fi tuning and description (Windows)
+    kvm.rs            keyboard and mouse mode: pointer tracking, return, Windows injection
     input.rs          winit input to protocol events (HID usages, normalised coords)
     selftest.rs       --self-test: decode and draw a built-in clip without a window
     store.rs          client id, paired hosts (token, pinned certificate fingerprint)
@@ -61,7 +64,9 @@ QUIC (`quinn`, TLS via `rustls` with a self-signed host certificate). Messages a
 Per connection:
 - **Control stream** (bidirectional, opened by the client): `Hello`, then pairing messages
   if needed, then `Welcome` or `Rejected`. After that the client sends `Input`, `Stats`,
-  `RequestKeyframe` and `Network` (its link, once known); the host sends `Notice`s.
+  `RequestKeyframe`, `Network` (its link, once known) and, in keyboard and mouse mode,
+  `ReturnControl` and `Clipboard`; the host sends `Notice`s and, in that mode,
+  `RemoteEnter`, `Remote`, `RemoteLeave` and `Clipboard`.
 - **Video stream** (unidirectional, host to client): `VideoFrame`s, each one access unit in
   Annex-B form with its capture timestamp and a keyframe flag.
 
@@ -109,6 +114,40 @@ Latency beats completeness everywhere:
   and asks the host for one.
 - The client draws as soon as a frame is decoded (`UserEvent::Frame`), not on the next
   redraw tick.
+
+## Keyboard and mouse mode
+
+A software KVM: the Mac's keyboard and mouse control a client's own monitors. The client
+sends a `KvmLayout` in its `Hello`: the rectangles (its desktop pixels) of the monitors set
+to "Keyboard and mouse", plus, in a mixed layout, the monitor showing the streamed
+screen. A client using only keyboard and mouse sets `input_only`; the host creates no
+display and sends no video.
+
+**Host** (`kvm.rs`, `platform/macos/kvm.rs`). Sessions register a link with an anchor:
+their own virtual display (mixed), or a side of the main display (keyboard and mouse only;
+saved per client in the settings). An active `CGEventTap` on its own thread sees every
+local mouse and keyboard event; events this process injected (from screen clients) are
+ignored by source pid. While the host has control, pointer motion that pushes against a
+display edge (macOS holds the cursor there when nothing lies beyond) is checked against the
+links: mixed maps the point on the virtual display to the client's streamed monitor and
+looks just past its edge; beside maps the point along the main display's edge onto the
+facing edge of the client's monitors. On a match the host sends its clipboard text (if
+changed) and `RemoteEnter`, freezes the cursor (`CGAssociateMouseAndMouseCursorPosition`)
+and hides it (with the private `SetsCursorInBackground` connection property, as other
+KVMs do), then swallows all input and forwards it as `Remote` events: relative motion,
+buttons, scroll, and keys as HID usages (mac keycodes mapped back through the injection
+table; modifier presses derived from device-dependent flag bits). Ctrl+Alt+Shift+K, a
+failed send or the session ending takes control back.
+
+**Client** (`kvm.rs`). Keeps its own pointer position, moves it by the host's deltas
+(scaled by each monitor's pixels per point) and places the cursor absolutely, so the
+client OS's pointer acceleration isn't applied twice. Moving onto the streamed monitor
+(mixed) or across the edge facing the host (beside) sends `ReturnControl`, preceded by its
+clipboard text if that changed; elsewhere the pointer slides along the outer edge. Held
+keys and buttons are released whenever control leaves. While the host has control, input
+arriving in the client's own windows is not forwarded (it would echo back). Windows
+injection uses `SendInput` (scancodes, absolute virtual-desktop moves); macOS and Linux
+clients can't be controlled yet.
 
 ## Adapting to the network
 

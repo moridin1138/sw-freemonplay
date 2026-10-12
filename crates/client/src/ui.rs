@@ -2,7 +2,7 @@
 //! connecting view. They only describe what to show and report what the user asked for;
 //! app.rs acts on it.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use egui::{Align, Color32, Key, Layout, RichText};
 
@@ -18,6 +18,28 @@ pub enum Screen {
     Code { target: Target, fingerprint: String, code: String, error: Option<String> },
     Connecting { to: String },
     Streaming,
+    /// Keyboard and mouse only: connected, with no video to show.
+    Remote { host: String },
+}
+
+/// What one of this computer's monitors does while connected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    /// Shows one of the host's screens.
+    Screen,
+    /// Stays this computer's own, controlled by the host's keyboard and mouse.
+    KeyboardMouse,
+    Unused,
+}
+
+impl Role {
+    fn label(self) -> &'static str {
+        match self {
+            Role::Screen => "Screen for the host",
+            Role::KeyboardMouse => "Keyboard and mouse",
+            Role::Unused => "Not used",
+        }
+    }
 }
 
 pub struct HostRow {
@@ -42,8 +64,23 @@ pub struct Options {
     pub codec: CodecArg,
     /// Stop this screen dimming, locking or sleeping while connected.
     pub keep_awake: bool,
-    /// Other monitors to use as well (by `MonitorRow::key`).
-    pub extra_monitors: HashSet<String>,
+    /// What the monitor this window is on does.
+    pub main_role: Role,
+    /// What the other monitors do (by `MonitorRow::key`; missing means unused).
+    pub roles: HashMap<String, Role>,
+    /// Keyboard and mouse mode: Command acts as Ctrl, so Mac shortcuts work.
+    pub swap_command_control: bool,
+}
+
+impl Options {
+    pub fn role(&self, key: &str) -> Role {
+        self.roles.get(key).copied().unwrap_or(Role::Unused)
+    }
+
+    /// Whether any monitor takes the host's keyboard and mouse.
+    pub fn any_keyboard_mouse(&self) -> bool {
+        self.main_role == Role::KeyboardMouse || self.roles.values().any(|&r| r == Role::KeyboardMouse)
+    }
 }
 
 pub enum Action {
@@ -52,6 +89,7 @@ pub enum Action {
     SubmitCode,
     CancelCode,
     CancelConnect,
+    Disconnect,
 }
 
 /// Graphite and amber, matching the app icon, in dark mode.
@@ -71,6 +109,8 @@ pub struct View<'a> {
     pub screen: &'a mut Screen,
     pub hosts: &'a [HostRow],
     pub monitors: &'a [MonitorRow],
+    /// Whether this OS can take the host's keyboard and mouse yet.
+    pub kvm_supported: bool,
     pub message: Option<&'a str>,
     pub address: &'a mut String,
     pub options: &'a mut Options,
@@ -101,10 +141,11 @@ pub fn draw(ui: &mut egui::Ui, view: View<'_>) -> Option<Action> {
                 ui.add_space(8.0);
             }
             action = match view.screen {
-                Screen::Hosts => hosts(ui, view.hosts, view.monitors, view.address, view.options),
+                Screen::Hosts => hosts(ui, view.hosts, view.monitors, view.kvm_supported, view.address, view.options),
                 Screen::Code { target, code, error, .. } => code_dialog(ui, &target.name, code, error.as_deref()),
                 Screen::Connecting { to } => connecting(ui, to),
                 Screen::Streaming => None,
+                Screen::Remote { host } => remote(ui, host),
             };
         });
     action
@@ -114,6 +155,7 @@ fn hosts(
     ui: &mut egui::Ui,
     hosts: &[HostRow],
     monitors: &[MonitorRow],
+    kvm_supported: bool,
     address: &mut String,
     options: &mut Options,
 ) -> Option<Action> {
@@ -155,22 +197,40 @@ fn hosts(
         });
     });
 
-    if !monitors.is_empty() {
+    if !monitors.is_empty() || kvm_supported {
         ui.add_space(4.0);
-        ui.label(RichText::new("Also use these monitors").strong())
-            .on_hover_text("Each one becomes another screen on the host, next to this one.");
-        ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("Monitors").strong()).on_hover_text(
+            "Screen: shows another screen for the host. Keyboard and mouse: stays this computer's, \
+             and the host's keyboard and mouse can move onto it.",
+        );
+        egui::Grid::new("monitors").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+            ui.label("This monitor (the window's)");
+            let choices: &[Role] = if kvm_supported { &[Role::Screen, Role::KeyboardMouse] } else { &[Role::Screen] };
+            role_picker(ui, "main", &mut options.main_role, choices);
+            ui.end_row();
             for m in monitors {
-                let mut on = options.extra_monitors.contains(&m.key);
-                if ui.checkbox(&mut on, &m.label).changed() {
-                    if on {
-                        options.extra_monitors.insert(m.key.clone());
-                    } else {
-                        options.extra_monitors.remove(&m.key);
-                    }
+                ui.label(&m.label);
+                let mut role = options.role(&m.key);
+                // A screen needs the main window streaming too (the extra screens join it).
+                let mut choices = vec![Role::Unused];
+                if options.main_role == Role::Screen {
+                    choices.push(Role::Screen);
                 }
+                if kvm_supported {
+                    choices.push(Role::KeyboardMouse);
+                }
+                if !choices.contains(&role) {
+                    role = Role::Unused;
+                }
+                role_picker(ui, &m.key, &mut role, &choices);
+                options.roles.insert(m.key.clone(), role);
+                ui.end_row();
             }
         });
+        if options.any_keyboard_mouse() {
+            ui.checkbox(&mut options.swap_command_control, "Mac shortcuts: Command acts as Ctrl")
+                .on_hover_text("So Command+C copies here too. Ctrl then acts as the Windows key.");
+        }
     }
 
     ui.add_space(4.0);
@@ -220,6 +280,31 @@ fn hosts(
             .weak()
             .small(),
     );
+    action
+}
+
+fn role_picker(ui: &mut egui::Ui, id: &str, role: &mut Role, choices: &[Role]) {
+    egui::ComboBox::from_id_salt(("role", id)).selected_text(role.label()).show_ui(ui, |ui| {
+        for &choice in choices {
+            ui.selectable_value(role, choice, choice.label());
+        }
+    });
+}
+
+/// Keyboard and mouse only: nothing to show but how to use it.
+fn remote(ui: &mut egui::Ui, host: &str) -> Option<Action> {
+    let mut action = None;
+    ui.label(RichText::new(format!("Connected to {host}")).strong().size(16.0));
+    ui.label(
+        "Its keyboard and mouse can move onto this computer's monitors: push its pointer off the \
+         side of its main display that faces them (set in freemonplay's menu there). Moving back \
+         returns them; Ctrl+Alt+Shift+K on the host brings them back from anywhere.",
+    );
+    ui.label(RichText::new("Text you copy on one computer can be pasted on the other.").weak());
+    ui.add_space(6.0);
+    if ui.button("Disconnect").clicked() {
+        action = Some(Action::Disconnect);
+    }
     action
 }
 

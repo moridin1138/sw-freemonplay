@@ -96,7 +96,11 @@ On each device that should become a screen:
 ./freemonplay-client
 ```
 
-A window lists the computers running freemonplay on your network. Drag it to the monitor you want to use, click **Connect**, and enter the pairing code shown in the host's menu the first time (after that it reconnects without one). The screen fills that monitor; disconnecting brings the list back. If the device has more monitors, tick them under **Also use these monitors** and each becomes another screen on the host (arrange them in the host's Display settings; they're remembered). Hosts on other networks can be reached with **Connect by address**, and **Options** sets full screen, sharpness (1x/2x), codec, vsync and whether to keep the screen awake while connected (on by default).
+A window lists the computers running freemonplay on your network. Drag it to the monitor you want to use, click **Connect**, and enter the pairing code shown in the host's menu the first time (after that it reconnects without one). The screen fills that monitor; disconnecting brings the list back. Under **Monitors**, each of the device's monitors can be:
+- **Screen for the host:** another screen for the Mac (arrange them in its Display settings; they're remembered).
+- **Keyboard and mouse** (Windows clients for now): stays the device's own, but the Mac's keyboard and mouse can move onto it, like Universal Control. With a streamed screen too, the Mac's pointer reaches these monitors by leaving that screen toward them, matching the device's own monitor layout. With no screen, they sit beside the Mac's main display, on the side chosen in the host's menu. Copied text follows the keyboard and mouse across. **Ctrl+Alt+Shift+K** on the Mac takes them back from anywhere; "Mac shortcuts" makes Command act as Ctrl.
+- **Not used.**
+ Hosts on other networks can be reached with **Connect by address**, and **Options** sets full screen, sharpness (1x/2x), codec, vsync and whether to keep the screen awake while connected (on by default).
 
 Useful options:
 
@@ -106,6 +110,7 @@ Useful options:
 | `client --windowed 1280x800` | Stream in a window instead of full screen |
 | `client --monitor 1` | Open the window on a different monitor |
 | `client --all-monitors` | Use all of this device's monitors, each as its own screen |
+| `client --keyboard-mouse` | No screens: the Mac's keyboard and mouse control all of this device's monitors (Windows) |
 | `client --self-test` | Check this machine's video decoder and GPU display path, then exit (no window needed) |
 | `client --scale 2` | Force Retina-style 2x rendering (`auto` uses it on high-density screens) |
 | `client --allow-sleep` | Let the screen dim, lock or sleep while connected (by default it's kept awake) |

@@ -7,6 +7,7 @@
 
 mod encoder;
 mod frame;
+mod kvm;
 #[cfg(target_os = "macos")]
 mod menubar;
 mod pattern;

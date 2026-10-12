@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub mod hid;
 pub mod pairing;
 
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 pub const ALPN: &[u8] = b"freemonplay/1";
 pub const SERVICE_TYPE: &str = "_freemonplay._udp.local.";
 pub const DEFAULT_PORT: u16 = 47800;
@@ -35,6 +35,89 @@ pub enum ClientMsg {
     PairingProof(Vec<u8>),
     /// The client's network link, once known, for the host to show.
     Network(NetworkInfo),
+    /// Keyboard and mouse mode: the pointer left the client's monitors back toward the
+    /// host, which takes its keyboard and mouse back.
+    ReturnControl(ReturnAt),
+    /// The client's clipboard text, sent as control returns to the host when it changed.
+    Clipboard(String),
+}
+
+/// Where the pointer goes back to the host.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ReturnAt {
+    /// Mixed layout: it moved onto the monitor showing the host's screen, at this point
+    /// (0 to 1 across and down that monitor).
+    Screen { x: f32, y: f32 },
+    /// Only keyboard and mouse monitors: it crossed the edge leading back to the host
+    /// (the `back` edge of [`HostMsg::RemoteEnter`]), this far along it (0 to 1).
+    Edge { along: f32 },
+}
+
+/// The client's monitors in its own desktop coordinates (physical pixels).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Rect {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Rect {
+    pub fn right(&self) -> i32 {
+        self.x + self.width as i32
+    }
+
+    pub fn bottom(&self) -> i32 {
+        self.y + self.height as i32
+    }
+
+    pub fn contains(&self, x: f64, y: f64) -> bool {
+        x >= self.x as f64 && x < self.right() as f64 && y >= self.y as f64 && y < self.bottom() as f64
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Edge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl Edge {
+    pub fn opposite(self) -> Edge {
+        match self {
+            Edge::Left => Edge::Right,
+            Edge::Right => Edge::Left,
+            Edge::Top => Edge::Bottom,
+            Edge::Bottom => Edge::Top,
+        }
+    }
+}
+
+/// Keyboard and mouse mode: which of the client's monitors the host's keyboard and mouse
+/// can move onto.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KvmLayout {
+    /// Monitors the host's pointer can move onto (the client's own desktop).
+    pub monitors: Vec<Rect>,
+    /// Mixed layout: the monitor showing this session's screen. The pointer reaches
+    /// `monitors` by leaving the host's screen toward them. `None`: no screen is streamed,
+    /// and the monitors sit beside one of the host's own displays (the host decides which
+    /// side).
+    pub screen: Option<Rect>,
+}
+
+/// The host's keyboard and mouse, while they control the client.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum RemoteInput {
+    /// Relative movement in the host's points (its pointer acceleration already applied).
+    Move { dx: f32, dy: f32 },
+    Button { button: MouseButton, pressed: bool },
+    /// Positive `dy` scrolls up; `precise` means pixels (trackpad), otherwise lines.
+    Scroll { dx: f32, dy: f32, precise: bool },
+    /// `usage` is a USB HID keyboard usage id, see [`hid`].
+    Key { usage: u16, pressed: bool },
 }
 
 /// How the client reaches the host, described for people (e.g. "Wi-Fi 6, 5 GHz or higher,
@@ -79,6 +162,10 @@ pub struct Hello {
     /// its main one (the monitor its window is on), which keeps the client's original
     /// identity on the host.
     pub screen: Option<ScreenId>,
+    /// Keyboard and mouse mode: monitors the host's keyboard and mouse may move onto.
+    pub kvm: Option<KvmLayout>,
+    /// No screen: only keyboard and mouse (and the clipboard). The host creates no display.
+    pub input_only: bool,
 }
 
 /// One of a client's monitors, so the host gives each its own virtual display that the
@@ -167,6 +254,17 @@ pub enum HostMsg {
     Notice { message: String },
     /// Pairing step 2: the host's SPAKE2 message and its proof (see [`pairing`]).
     PairingChallenge { pake: Vec<u8>, proof: Vec<u8> },
+    /// Keyboard and mouse mode: the host's pointer moved onto the client's `monitor` (an
+    /// index into [`KvmLayout::monitors`]) at this point (0 to 1 across and down it). The
+    /// client now gets [`HostMsg::Remote`] input until it returns control. `back` is the
+    /// edge of the client's monitors leading back to the host (`None` in a mixed layout,
+    /// where moving onto the host's screen returns).
+    RemoteEnter { monitor: u32, x: f32, y: f32, back: Option<Edge> },
+    Remote(RemoteInput),
+    /// The host took its keyboard and mouse back (its escape shortcut, or it gave up).
+    RemoteLeave,
+    /// The host's clipboard text, sent as control moves to the client when it changed.
+    Clipboard(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -309,6 +407,8 @@ mod tests {
             auth: Auth::Pake(vec![1; 33]),
             display: DisplayRequest { width: 1920, height: 1080, refresh_hz: 60, hidpi: false, size_mm: None },
             codecs: vec![Codec::H265, Codec::H264],
+            kvm: None,
+            input_only: false,
             screen: Some(ScreenId { key: "\\\\.\\DISPLAY2".into(), name: "DISPLAY2".into() }),
         });
         let bytes = encode(&hello).unwrap();

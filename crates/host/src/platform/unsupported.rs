@@ -78,3 +78,29 @@ pub mod network {
         None
     }
 }
+
+pub mod kvm {
+    //! Keyboard and mouse mode needs a way to watch and capture the local input; only
+    //! macOS has one so far.
+    use std::sync::Arc;
+
+    use anyhow::{Result, bail};
+
+    use crate::kvm::{Bounds, Kvm};
+
+    pub fn start(_kvm: Arc<Kvm>) -> Result<()> {
+        bail!("not supported on this OS yet")
+    }
+    pub fn display_bounds(_display: u32) -> Option<Bounds> {
+        None
+    }
+    pub fn main_display() -> u32 {
+        0
+    }
+    pub fn capture_cursor(_park: (f64, f64)) {}
+    pub fn release_cursor(_at: (f64, f64)) {}
+    pub fn clipboard_text() -> Option<String> {
+        None
+    }
+    pub fn set_clipboard(_text: &str) {}
+}

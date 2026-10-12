@@ -6,10 +6,13 @@
 //! screens. They all end together.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use fmp_proto::{ClientMsg, ClientStats, Codec, DisplayRequest, InputEvent, NetworkInfo, ScreenId, TouchPhase};
+use fmp_proto::{
+    ClientMsg, ClientStats, Codec, DisplayRequest, InputEvent, KvmLayout, NetworkInfo, Rect, ScreenId, TouchPhase,
+};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use winit::application::ApplicationHandler;
@@ -27,7 +30,8 @@ use crate::link::{self, LinkTuning};
 use crate::net::{self, Credentials, HostList, Prepared, Target};
 use crate::render::{Renderer, UiFrame};
 use crate::store::ClientStore;
-use crate::ui::{self, Action, HostRow, MonitorRow, Options, Screen};
+use crate::kvm;
+use crate::ui::{self, Action, HostRow, MonitorRow, Options, Role, Screen};
 use crate::{CodecArg, Scale};
 
 const PICKER_SIZE: LogicalSize<f64> = LogicalSize::new(580.0, 600.0);
@@ -51,6 +55,7 @@ pub enum UserEvent {
 pub struct Startup {
     pub monitor: Option<usize>,
     pub all_monitors: bool,
+    pub keyboard_mouse: bool,
     pub windowed: Option<(u32, u32)>,
     pub host: Option<String>,
     pub code: Option<String>,
@@ -158,6 +163,11 @@ pub struct App {
     /// description for the host.
     link: Option<LinkTuning>,
     network: Option<NetworkInfo>,
+    /// The main session is keyboard and mouse only (no video).
+    input_only: bool,
+    /// Set while the host's keyboard and mouse control this computer: its input then lands
+    /// in our windows too, and mustn't be sent back.
+    host_in_control: Arc<AtomicBool>,
     pub exit_error: Option<String>,
 }
 
@@ -196,6 +206,8 @@ impl App {
             awake: None,
             link: None,
             network: None,
+            input_only: false,
+            host_in_control: Arc::default(),
             exit_error: None,
         }
     }
@@ -241,8 +253,12 @@ impl App {
             Some(renderer.max_texture_side()),
         ));
         self.displays.insert(MAIN, Display::new(window, renderer, None));
+        let others: Vec<String> = self.other_monitors().into_iter().map(|m| m.key).collect();
         if self.startup.all_monitors {
-            self.options.extra_monitors = self.other_monitors().into_iter().map(|m| m.key).collect();
+            self.options.roles = others.into_iter().map(|k| (k, Role::Screen)).collect();
+        } else if self.startup.keyboard_mouse && kvm::supported() {
+            self.options.main_role = Role::KeyboardMouse;
+            self.options.roles = others.into_iter().map(|k| (k, Role::KeyboardMouse)).collect();
         }
         if let Some(spec) = self.startup.host.take() {
             self.connect_address(spec);
@@ -358,6 +374,11 @@ impl App {
         if view == MAIN {
             self.target = Some(target.clone());
         }
+        let kvm = if view == MAIN { self.kvm_layout() } else { None };
+        let input_only = view == MAIN && self.options.main_role == Role::KeyboardMouse;
+        if view == MAIN {
+            self.input_only = input_only;
+        }
         let Some(display) = self.displays.get(&view) else { return };
         let pairing = matches!(credentials, Credentials::Code(_)).then(|| (target, connected.fingerprint.clone()));
         let request = self.display_request(display);
@@ -366,6 +387,9 @@ impl App {
         let session = net::Session {
             view,
             screen: display.extra.as_ref().map(|(_, id)| id.clone()),
+            kvm,
+            input_only,
+            host_in_control: self.host_in_control.clone(),
             connected,
             credentials,
             client_name: self.client_name.clone(),
@@ -391,6 +415,27 @@ impl App {
             display.task = Some(task);
             display.live = Some(Live { out: out_tx, conn, pairing, connected: false, disconnecting: false });
         }
+    }
+
+    /// Keyboard and mouse mode: the monitors set to it, with pixels per host point, plus
+    /// the main monitor when it shows the host's screen (a mixed layout).
+    fn kvm_layout(&self) -> Option<(KvmLayout, Vec<f64>, bool)> {
+        let main = self.main()?.window.current_monitor()?;
+        let mut monitors: Vec<MonitorHandle> =
+            self.other_monitors().into_iter().filter(|m| self.options.role(&m.key) == Role::KeyboardMouse).map(|m| m.monitor).collect();
+        let screen = match self.options.main_role {
+            Role::KeyboardMouse => {
+                monitors.insert(0, main);
+                None
+            }
+            _ => Some(rect_of(&main)),
+        };
+        if monitors.is_empty() || !kvm::supported() {
+            return None;
+        }
+        let layout = KvmLayout { monitors: monitors.iter().map(rect_of).collect(), screen };
+        let scales = monitors.iter().map(MonitorHandle::scale_factor).collect();
+        Some((layout, scales, self.options.swap_command_control))
     }
 
     /// The virtual display to ask for: the size of the display's monitor (or the windowed
@@ -421,6 +466,21 @@ impl App {
             (self.link, self.network) = link::tune(host);
         }
         let network = self.network.clone();
+        if view == MAIN && self.input_only {
+            tracing::info!("connected to {host_name} for keyboard and mouse only");
+            if let Some(main) = self.displays.get_mut(&MAIN) {
+                if let Some(live) = &mut main.live {
+                    live.connected = true;
+                    if let Some(network) = network {
+                        let _ = live.out.send(ClientMsg::Network(network));
+                    }
+                }
+                main.window.set_title(&format!("freemonplay: {host_name} (keyboard and mouse)"));
+            }
+            self.screen = Screen::Remote { host: host_name };
+            self.redraw();
+            return;
+        }
         let Some(display) = self.displays.get_mut(&view) else { return };
         tracing::info!("display {view}: connected to {host_name}, receiving {width}x{height} {codec}");
         if let Some(live) = &mut display.live {
@@ -459,7 +519,7 @@ impl App {
     fn open_extras(&mut self, event_loop: &ActiveEventLoop) {
         let Some(target) = self.target.clone() else { return };
         let selected: Vec<MonitorRow> =
-            self.other_monitors().into_iter().filter(|m| self.options.extra_monitors.contains(&m.key)).collect();
+            self.other_monitors().into_iter().filter(|m| self.options.role(&m.key) == Role::Screen).collect();
         for row in selected {
             let view = self.next_view;
             self.next_view += 1;
@@ -559,6 +619,7 @@ impl App {
         self.awake = None;
         self.link = None;
         self.network = None;
+        self.input_only = false;
         self.hint_until = None;
         self.target = None;
         // A failed first pairing goes back to the code dialog; anything else to the list.
@@ -595,6 +656,7 @@ impl App {
                 }
             }
             Action::CancelCode => self.screen = Screen::Hosts,
+            Action::Disconnect => self.disconnect(),
             Action::CancelConnect => {
                 if let Some(main) = self.displays.get_mut(&MAIN) {
                     if let Some(task) = main.task.take() {
@@ -638,6 +700,7 @@ impl App {
                     screen: &mut self.screen,
                     hosts: &hosts,
                     monitors: &monitors,
+                    kvm_supported: kvm::supported(),
                     message: self.message.as_deref(),
                     address: &mut self.address,
                     options: &mut self.options,
@@ -712,6 +775,9 @@ impl App {
     /// Mouse, keyboard and touch while streaming: forwarded to the host screen of the
     /// window they happened in, apart from our own shortcuts.
     fn stream_input(&mut self, event_loop: &ActiveEventLoop, view: usize, event: WindowEvent) {
+        if self.host_in_control.load(Ordering::Relaxed) && !matches!(event, WindowEvent::Focused(_)) {
+            return;
+        }
         let m = self.modifiers;
         let Some(display) = self.displays.get_mut(&view) else { return };
         match event {
@@ -857,6 +923,12 @@ impl ApplicationHandler<UserEvent> for App {
             None => event_loop.set_control_flow(ControlFlow::Wait),
         }
     }
+}
+
+/// A monitor's area on this computer's desktop, in physical pixels.
+fn rect_of(m: &MonitorHandle) -> Rect {
+    let (p, size) = (m.position(), m.size());
+    Rect { x: p.x, y: p.y, width: size.width, height: size.height }
 }
 
 /// Frames shown and their received-to-shown time, reported to the host every 2 s and

@@ -6,9 +6,18 @@ publishes it as the release notes.
 
 ## [Unreleased]
 
-Hosts and clients must both be updated: the protocol changed (version 7).
+Hosts and clients must both be updated: the protocol changed (version 8).
 
 ### Added
+- **Keyboard and mouse mode** (a software KVM; Windows clients for now). Each of a
+  client's monitors can be a *screen* for the Mac, *keyboard and mouse* (stays the
+  client's own, but the Mac's keyboard and mouse can move onto it) or unused. Mixed
+  example: a PC with three monitors lends one to the Mac as a screen and keeps two, which
+  the Mac's pointer reaches by moving off that screen's edges, as on the desk. With no
+  screen at all, the client's monitors sit beside the Mac's main display (side chosen in
+  the menu). Copied text follows control across. Ctrl+Alt+Shift+K on the Mac takes the
+  keyboard and mouse back from anywhere. "Mac shortcuts" (on by default) makes Command
+  act as Ctrl. `--keyboard-mouse` uses all the client's monitors this way.
 - **Adaptive bitrate.** The host lowers the bitrate when the network can't keep up (sends
   stalling, or packet loss) and raises it again once things are calm, instead of letting
   video queue up. The menu shows the current bitrate and packet loss per screen.
@@ -22,7 +31,7 @@ Hosts and clients must both be updated: the protocol changed (version 7).
 - **Delay and loss measurements:** each screen reports how many frames were delayed in
   transit (and by how much), and the host logs packet loss, so you can tell Wi-Fi
   stalls from a slow link.
-- **Several monitors on one client.** Tick "Also use these monitors" (or pass
+- **Several monitors on one client.** Set other monitors to "Screen for the host" (or pass
   `--all-monitors`) and each of the client's monitors becomes its own screen on the host,
   remembered separately by macOS. The main window's screen keeps its identity, so existing
   arrangements stay put.

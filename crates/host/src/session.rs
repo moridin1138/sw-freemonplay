@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use fmp_proto::{
-    Auth, ClientMsg, Codec, DisplayRequest, Hello, HostMsg, InputEvent, PROTOCOL_VERSION, RejectKind, VideoFrame,
+    Auth, ClientMsg, Codec, DisplayRequest, Edge, Hello, HostMsg, InputEvent, PROTOCOL_VERSION, RejectKind, VideoFrame,
     Welcome,
     decode, pairing, peek_hello_protocol, read_frame, read_msg, write_msg,
 };
@@ -18,7 +18,8 @@ use crate::frame::{FrameSlot, Next};
 use crate::pattern::Pattern;
 use crate::platform::{Capture, Injector, VirtualDisplay};
 use crate::rate::{self, RateControl};
-use crate::registry::{Registry, SessionGuard, SessionInfo};
+use crate::kvm::{Anchor, Kvm};
+use crate::registry::{KvmRole, Registry, SessionGuard, SessionInfo};
 use crate::settings::Settings;
 use crate::store::HostStore;
 
@@ -39,6 +40,8 @@ pub struct Ctx {
     pub encoder: EncoderChoice,
     /// Stream a generated test picture instead of a virtual display.
     pub test_pattern: bool,
+    /// Keyboard and mouse mode, shared by all sessions.
+    pub kvm: Arc<Kvm>,
 }
 
 #[derive(Default)]
@@ -72,7 +75,23 @@ impl Ctx {
             bitrate_bps,
             encoder,
             test_pattern,
+            kvm: Kvm::new(),
         })
+    }
+
+    /// Which side of the main display a client's keyboard and mouse monitors sit on.
+    pub fn kvm_side(&self, client_id: &str) -> Edge {
+        self.settings.lock().unwrap().kvm_sides.get(client_id).copied().unwrap_or(Edge::Right)
+    }
+
+    /// Moves a keyboard-and-mouse-only session's monitors to another side, now and next time.
+    pub fn set_kvm_side(&self, session: u64, side: Edge) {
+        let Some(client_id) = self.registry.client_id(session) else { return };
+        self.update_settings(|s| {
+            s.kvm_sides.insert(client_id, side);
+        });
+        self.kvm.set_side(session, side);
+        self.registry.set_kvm(session, KvmRole::Beside(side));
     }
 
     /// Saved settings with command line overrides applied.
@@ -187,6 +206,9 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
             tracing::info!("network tip: {tip}");
         }
     }
+    if hello.input_only {
+        return input_only(&ctx, conn, send, recv, hello, screen_name, issued_token).await;
+    }
 
     let req = sanitize(hello.display);
     let settings = ctx.settings();
@@ -248,7 +270,9 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     let session = ctx.registry.add(
         SessionInfo {
             id: 0,
+            client_id: hello.client_id.clone(),
             client_name: screen_name.clone(),
+            kvm: None,
             addr: conn.remote_address(),
             width,
             height,
@@ -266,6 +290,13 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         },
         conn.clone(),
     );
+    // Messages to the client on the control stream (notices, keyboard and mouse mode).
+    let (host_tx, mut host_rx) = mpsc::unbounded_channel::<HostMsg>();
+    if let (Some(layout), Source::Screen { display, .. }) = (hello.kvm.clone(), &source) {
+        let anchor = Anchor::Screen { display: display.id() };
+        ctx.kvm.register(session.id(), &screen_name, host_tx.clone(), layout, anchor);
+        session.set_kvm(KvmRole::Mixed);
+    }
 
     // Frames travel with their capture time, to measure capture-to-sent latency.
     let (tx, mut rx) = mpsc::channel::<(VideoFrame, Instant)>(2);
@@ -324,6 +355,8 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
                 None => return anyhow::Ok(()),
                 Some(ClientMsg::Input(event)) if ctx.settings().allow_input => source.inject(&event),
                 Some(ClientMsg::RequestKeyframe) => slot.request_keyframe(),
+                Some(ClientMsg::ReturnControl(at)) => ctx.kvm.return_control(session.id(), at),
+                Some(ClientMsg::Clipboard(text)) => ctx.kvm.clipboard_from_client(text),
                 Some(ClientMsg::Network(network)) => {
                     tracing::info!("{who}: network: {}", network.summary);
                     session.update_network(network);
@@ -355,9 +388,15 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
                            the entry and allow it again: it may belong to an older build."
                 .to_string();
             tracing::warn!("{who}: {message}");
-            write_msg(&mut send, &HostMsg::Notice { message }).await?;
+            let _ = host_tx.send(HostMsg::Notice { message });
         }
         std::future::pending::<()>().await;
+        anyhow::Ok(())
+    };
+    let writer = async {
+        while let Some(msg) = host_rx.recv().await {
+            write_msg(&mut send, &msg).await?;
+        }
         anyhow::Ok(())
     };
 
@@ -365,8 +404,10 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         r = sender => r,
         r = control => r,
         r = watchdog => r,
+        r = writer => r,
         _ = conn.closed() => Ok(()),
     };
+    ctx.kvm.unregister(session.id());
 
     slot.close();
     match encoder.join() {
@@ -379,6 +420,88 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         drop(capture);
         drop(display);
     }
+    result
+}
+
+/// A keyboard-and-mouse-only session: no display, no video. The client's monitors sit
+/// beside this computer's main display, and the session lasts until the client leaves.
+async fn input_only(
+    ctx: &Arc<Ctx>,
+    conn: quinn::Connection,
+    mut send: quinn::SendStream,
+    mut recv: quinn::RecvStream,
+    hello: Hello,
+    name: String,
+    issued_token: Option<Vec<u8>>,
+) -> Result<()> {
+    let Some(layout) = hello.kvm.clone().filter(|l| !l.monitors.is_empty()) else {
+        let who = format!("{name} ({})", conn.remote_address());
+        return reject(&conn, &mut send, &who, RejectKind::Other, "no monitors offered for keyboard and mouse".into()).await;
+    };
+    write_msg(
+        &mut send,
+        &HostMsg::Welcome(Welcome {
+            host_id: ctx.store.host_id.clone(),
+            host_name: ctx.host_name.clone(),
+            width: 0,
+            height: 0,
+            refresh_hz: 0,
+            codec: Codec::H264,
+            issued_token,
+        }),
+    )
+    .await?;
+    let side = ctx.kvm_side(&hello.client_id);
+    let session = ctx.registry.add(
+        SessionInfo {
+            id: 0,
+            client_id: hello.client_id.clone(),
+            client_name: name.clone(),
+            kvm: Some(KvmRole::Beside(side)),
+            addr: conn.remote_address(),
+            width: 0,
+            height: 0,
+            codec: Codec::H264,
+            encoder: "none (keyboard and mouse only)",
+            fps: 0.0,
+            mbps: 0.0,
+            host_ms: 0.0,
+            rtt_ms: 0.0,
+            target_mbps: 0.0,
+            max_mbps: 0.0,
+            loss_pct: 0.0,
+            network: None,
+            client: None,
+        },
+        conn.clone(),
+    );
+    let (host_tx, mut host_rx) = mpsc::unbounded_channel::<HostMsg>();
+    let anchor = Anchor::Beside { display: crate::platform::kvm::main_display(), side };
+    ctx.kvm.register(session.id(), &name, host_tx, layout, anchor);
+
+    let control = async {
+        loop {
+            match read_msg::<ClientMsg>(&mut recv).await? {
+                None => return anyhow::Ok(()),
+                Some(ClientMsg::ReturnControl(at)) => ctx.kvm.return_control(session.id(), at),
+                Some(ClientMsg::Clipboard(text)) => ctx.kvm.clipboard_from_client(text),
+                Some(ClientMsg::Network(network)) => session.update_network(network),
+                Some(_) => {}
+            }
+        }
+    };
+    let writer = async {
+        while let Some(msg) = host_rx.recv().await {
+            write_msg(&mut send, &msg).await?;
+        }
+        anyhow::Ok(())
+    };
+    let result = tokio::select! {
+        r = control => r,
+        r = writer => r,
+        _ = conn.closed() => Ok(()),
+    };
+    ctx.kvm.unregister(session.id());
     result
 }
 
