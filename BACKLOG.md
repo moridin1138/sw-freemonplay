@@ -21,6 +21,8 @@ Roughly in priority order. Done items move to [CHANGELOG.md](CHANGELOG.md).
   - **Measured (Mac on 2.4 GHz, Surface on 5 GHz, 2026-10-12):** 0.0% packet loss, but 10 to 45 frames per 2 s delayed by 65 to 500 ms: Wi-Fi stalls, not loss. So forward error correction and reference frame invalidation (planned earlier; VideoToolbox does accept `EnableLTR` on an M4) wouldn't help on this network; revisit only if a network shows real loss. With both on 5 GHz (after moving the Surface off an access point that isolated its clients), delayed frames all but disappeared. Still worth testing: AWDL off on the Mac.
   - Check how often screens still ask for keyframes in normal use (the host now logs each request; one per connection is expected).
   - Check the adaptive bitrate's thresholds on a busy network (the 2.4 GHz Mac is a good test case).
+- **Translations, the rest:** the Wi-Fi tips and network summaries in the details menus, the installers (Inno Setup has Turkish, Spanish, French and German built in; Chinese needs an unofficial file), and the Mac apps' Info.plist text (local network prompt) via `InfoPlist.strings`. Native speakers to review the first translations.
+- **Debug builds of the screen app panic** at startup ("Dropped TexturesDelta with 2 unapplied deltas", an egui debug assertion): a frame's texture changes are dropped somewhere without being applied. Release builds are unaffected; fix so debug builds run.
 - **Zero copy on Linux clients** (VAAPI surfaces as DMA-BUFs into wgpu's Vulkan backend).
 
 ## Later
