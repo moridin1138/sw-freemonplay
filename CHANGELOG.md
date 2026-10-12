@@ -16,6 +16,16 @@ Hosts and clients must both be updated: the protocol changed (version 10).
   and Linux windows show the app icon too.
 
 ### Added
+- **Windows host: a tray app and an installer.** freemonplay on Windows now lives in the
+  notification area, with the same menu as on a Mac: the pairing code, connected screens
+  with live stats and Disconnect, the codec, frame rate, input and clipboard settings,
+  Start at Sign-in, Setup Guide and the log. A setup dialog checks the display driver and
+  the firewall rule, installs either with one click (Windows asks for administrator rights)
+  and shows the pairing code. The new `freemonplay-host-windows-x64-setup.exe` installs
+  the host with the Virtual Display Driver and the firewall rule in one go.
+- **Windows host: automatic display scaling.** HiDPI screens (a Retina Mac, or a PC at
+  150% or more) get 200% scaling, others 100%, so text appears the size it would on that
+  screen. Before, Windows picked 100% for a new 2940x1912 monitor, and everything was tiny.
 - **A setup window on the Mac host:** on first launch (and whenever Screen Recording is
   missing) a window walks through Screen Recording, Accessibility and connecting a first
   screen, with live status for each permission, buttons that open the right System
@@ -30,8 +40,7 @@ Hosts and clients must both be updated: the protocol changed (version 10).
   NV12 on the GPU, hardware encoded by Media Foundation (H.264 or HEVC, e.g. Intel Quick
   Sync) on the same device, so frames never pass through system memory; OpenH264 is the
   fallback. Input by `SendInput`, and the shared clipboard. Tested on a Surface (Iris Xe)
-  extending onto a MacBook Air at 2940x1912 HEVC. Run `freemonplay-host` from a terminal;
-  there's no tray app yet.
+  extending onto a MacBook Air at 2940x1912 HEVC.
 - **Mac downloads are disk images:** open one and drag the app to Applications.
 - **Copied images are shared too** (screenshots, images copied from apps), both ways,
   as PNG up to 24 MB. They travel on streams of their own, so a big one doesn't hold up

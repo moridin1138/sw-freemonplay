@@ -37,7 +37,7 @@ jobs:
           path: dist/*
 
   windows:
-    name: Windows (client)
+    name: Windows
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v7
@@ -45,7 +45,18 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
       - name: Build
-        run: cargo build --release --locked -p freemonplay-client
+        run: cargo build --release --locked -p freemonplay-client -p freemonplay-host
+      - name: Display driver
+        # The Virtual Display Driver (MIT licensed, signed by the SignPath Foundation) that
+        # the host installer bundles. Pinned by version and checksum.
+        shell: pwsh
+        run: |
+          $base = "https://github.com/VirtualDrivers/Virtual-Display-Driver"
+          Invoke-WebRequest "$base/releases/download/25.7.23/VirtualDisplayDriver-x86.Driver.Only.zip" -OutFile vdd.zip
+          $hash = (Get-FileHash vdd.zip -Algorithm SHA256).Hash
+          if ($hash -ne "E24210692B442B39AF763536330CE78B423F19342B7A7792C26DE3944E418B3A") { throw "unexpected driver download ($hash)" }
+          Expand-Archive vdd.zip -DestinationPath vdd
+          Invoke-WebRequest "https://raw.githubusercontent.com/VirtualDrivers/Virtual-Display-Driver/25.7.23/LICENSE" -OutFile vdd/VirtualDisplayDriver/LICENSE.txt
       - name: Package
         shell: pwsh
         run: |
@@ -58,6 +69,8 @@ jobs:
           choco install innosetup -y --no-progress | Out-Null
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp "/DVersion=$version" build\windows\freemonplay.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp "/DVersion=$version" build\windows\freemonplay-host.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v7
         with:

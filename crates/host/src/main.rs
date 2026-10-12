@@ -1,9 +1,12 @@
 //! freemonplay host: advertises itself on the LAN, and for every client that connects it
 //! creates a virtual display matching the client's screen and streams it there.
 
-// Only macOS hosts exist so far: on other OSes the menu bar's session/settings APIs and the
-// capture helpers have no callers yet.
+// Keyboard and mouse mode with this computer as the host is Mac only so far (and Linux has
+// no host yet), so elsewhere parts of it have no callers.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+// On Windows the host is a tray app, without a console window of its own; from a terminal
+// it writes to that terminal instead (see `system::attach_console`).
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 mod clipboard;
 mod encoder;
@@ -20,6 +23,8 @@ mod registry;
 mod session;
 mod settings;
 mod store;
+#[cfg(target_os = "windows")]
+mod tray;
 
 use std::net::{Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
@@ -72,11 +77,12 @@ struct Args {
     /// Needs no permissions and works on any OS.
     #[arg(long)]
     test_pattern: bool,
-    /// Run as a menu bar app. This is the default when launched as freemonplay.app.
-    #[arg(long, conflicts_with = "no_menubar")]
+    /// Run as a menu bar (Mac) or tray (Windows) app. This is the default on Windows, and
+    /// on a Mac when launched as freemonplay.app.
+    #[arg(long, visible_alias = "tray", conflicts_with = "no_menubar")]
     menubar: bool,
-    /// Run in the terminal even when launched from inside freemonplay.app.
-    #[arg(long)]
+    /// Run in the terminal instead of as a menu bar or tray app.
+    #[arg(long, visible_alias = "no-tray")]
     no_menubar: bool,
     /// Diagnostic: create a virtual display for a few seconds. Examples: 1920x1080,
     /// 2732x2048@2x (HiDPI), 1920x1080:30 (30 Hz).
@@ -92,25 +98,97 @@ struct Args {
     #[cfg(target_os = "windows")]
     #[arg(long)]
     uninstall_display_driver: bool,
+    /// Windows: let screens through Windows Firewall (as administrator).
+    #[cfg(target_os = "windows")]
+    #[arg(long)]
+    allow_firewall: bool,
+    /// Windows: remove the firewall rule again (as administrator).
+    #[cfg(target_os = "windows")]
+    #[arg(long)]
+    remove_firewall: bool,
+    /// Windows: ask the running tray app to quit (the uninstaller uses this).
+    #[cfg(target_os = "windows")]
+    #[arg(long)]
+    quit: bool,
 }
 
 fn main() -> Result<()> {
+    #[cfg(target_os = "windows")]
+    let console = platform::system::attach_console();
     let args = Args::parse();
-    let gui = cfg!(target_os = "macos") && !args.no_menubar && (args.menubar || launched_from_app_bundle());
+    #[cfg(target_os = "windows")]
+    {
+        // Setup steps (the installer and the tray app run these as administrator).
+        if args.quit {
+            tray::quit_running();
+            return Ok(());
+        }
+        let setup = args.install_display_driver.is_some() || args.uninstall_display_driver || args.allow_firewall || args.remove_firewall;
+        if setup {
+            let result = windows_setup(&args);
+            if let Err(e) = &result
+                && !console
+            {
+                platform::system::error_box(&format!("{e:#}"));
+            }
+            return result;
+        }
+    }
+    let gui = !args.no_menubar
+        && args.probe_display.is_none()
+        && (cfg!(target_os = "windows") || (cfg!(target_os = "macos") && (args.menubar || launched_from_app_bundle())));
+    #[cfg(target_os = "windows")]
+    let _instance = if gui {
+        match platform::system::single_instance() {
+            Some(instance) => Some(instance),
+            None => {
+                // Already running: show its setup dialog instead (like reopening the Mac app).
+                // SAFETY: finding the running copy's window by class and posting to it.
+                unsafe {
+                    use windows::Win32::Foundation::{LPARAM, WPARAM};
+                    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW};
+                    if let Ok(hwnd) = FindWindowW(tray::CLASS, windows::core::PCWSTR::null()) {
+                        let _ = PostMessageW(Some(hwnd), tray::WM_SHOW_SETUP, WPARAM(0), LPARAM(0));
+                    }
+                }
+                return Ok(());
+            }
+        }
+    } else {
+        None
+    };
+    let result = run(args, gui);
+    #[cfg(target_os = "windows")]
+    if gui && let Err(e) = &result {
+        platform::system::error_box(&format!("freemonplay couldn't start: {e:#}"));
+    }
+    result
+}
+
+#[cfg(target_os = "windows")]
+fn windows_setup(args: &Args) -> Result<()> {
+    init_logging(false)?;
+    if let Some(folder) = &args.install_display_driver {
+        platform::driver::install(folder)?;
+    }
+    if args.uninstall_display_driver {
+        platform::driver::uninstall()?;
+    }
+    if args.allow_firewall {
+        platform::system::allow_firewall()?;
+    }
+    if args.remove_firewall {
+        platform::system::remove_firewall()?;
+    }
+    Ok(())
+}
+
+fn run(args: Args, gui: bool) -> Result<()> {
     init_logging(gui)?;
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     if let Some(size) = &args.probe_display {
         return probe_display(size);
-    }
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(folder) = &args.install_display_driver {
-            return platform::driver::install(folder);
-        }
-        if args.uninstall_display_driver {
-            return platform::driver::uninstall();
-        }
     }
     if args.test_pattern {
         tracing::warn!("test pattern mode: clients get a generated picture, not a virtual display");
@@ -148,6 +226,8 @@ fn main() -> Result<()> {
     if gui {
         #[cfg(target_os = "macos")]
         menubar::run(ctx.clone(), log_path());
+        #[cfg(target_os = "windows")]
+        tray::run(ctx.clone(), log_path());
     } else {
         rt.block_on(async {
             let _ = tokio::signal::ctrl_c().await;
@@ -173,11 +253,16 @@ pub(crate) fn launched_from_app_bundle() -> bool {
 }
 
 fn log_path() -> PathBuf {
+    if cfg!(target_os = "windows") {
+        let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_default();
+        return local.join(r"freemonplay\host.log");
+    }
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     home.join("Library/Logs/freemonplay/host.log")
 }
 
-/// Terminal mode logs to stderr; the menu bar app (which has no terminal) to a file.
+/// Terminal mode logs to stderr; the menu bar and tray apps (which have no terminal) to a
+/// file.
 fn init_logging(to_file: bool) -> Result<()> {
     let filter = || {
         tracing_subscriber::EnvFilter::try_from_default_env()

@@ -45,6 +45,54 @@ impl SessionInfo {
     pub fn latency_ms(&self) -> Option<f32> {
         self.client.map(|c| self.host_ms + self.rtt_ms / 2.0 + c.display_ms)
     }
+
+    /// One line for the menu: who, size, codec and live stats.
+    pub fn title(&self) -> String {
+        let rate = if self.fps > 0.0 { format!(", {:.0} fps, {:.1} Mbit/s", self.fps, self.mbps) } else { String::new() };
+        let latency = self.latency_ms().map(|ms| format!(", ~{ms:.0} ms")).unwrap_or_default();
+        format!("{}: {}×{} {}{rate}{latency}", self.client_name, self.width, self.height, self.codec)
+    }
+
+    /// The session's details for its submenu; `None` is a separator. `this` names the host
+    /// computer ("This Mac").
+    pub fn details(&self, this: &str) -> Vec<Option<String>> {
+        let mut lines = vec![
+            Some(format!("Address: {}", self.addr.ip().to_canonical())),
+            Some(format!("Encoder: {}", self.encoder)),
+            Some(if self.target_mbps < self.max_mbps - 0.05 {
+                format!("Bitrate: {:.1} of {:.0} Mbit/s (lowered: the network is behind)", self.target_mbps, self.max_mbps)
+            } else {
+                format!("Bitrate: up to {:.0} Mbit/s", self.max_mbps)
+            }),
+        ];
+        if self.loss_pct >= 0.1 {
+            lines.push(Some(format!("Packets lost: {:.1}%", self.loss_pct)));
+        }
+        if let Some(network) = &self.network {
+            lines.push(Some(format!("Screen's network: {}", network.summary)));
+            lines.extend(network.advice.iter().map(|tip| Some(format!("    Tip: {tip}"))));
+        }
+        lines.push(None);
+        match (self.latency_ms(), self.client) {
+            (Some(total), Some(client)) => lines.extend(
+                [
+                    format!("Latency: about {total:.0} ms"),
+                    format!("    {this} (capture to sent): {:.1} ms", self.host_ms),
+                    format!("    Network (half the {:.1} ms round trip): {:.1} ms", self.rtt_ms, self.rtt_ms / 2.0),
+                    format!("    Screen (received to shown): {:.1} ms", client.display_ms),
+                    format!("Screen is showing {:.0} fps", client.shown_fps),
+                    match client.late_frames {
+                        0 => "No frames delayed in transit".to_string(),
+                        n => format!("{n} frames delayed in transit (worst {:.0} ms)", client.worst_late_ms),
+                    },
+                    "Plus up to one refresh while the screen waits to display.".to_string(),
+                ]
+                .map(Some),
+            ),
+            _ => lines.push(Some("Latency: waiting for the screen's first report".to_string())),
+        }
+        lines
+    }
 }
 
 struct Entry {

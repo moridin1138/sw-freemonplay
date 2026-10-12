@@ -36,6 +36,10 @@ crates/
     encoder.rs        codec negotiation; OpenH264 software fallback
     frame.rs          FrameSlot: newest-frame-wins handoff from capture to encoder
     menubar.rs        the macOS menu bar app (objc2-app-kit)
+    welcome.rs        the Mac setup window (permissions, pairing code)
+    tray.rs           the Windows tray app: notification area icon, the same menu
+                      (rebuilt each time it opens), and a setup dialog (TaskDialogIndirect
+                      with command links: driver, firewall, pairing code)
     platform/macos/   virtual_display.rs, capture.rs, videotoolbox.rs, input.rs,
                       network.rs (this Mac's Wi-Fi, via CoreWLAN),
                       kvm.rs (event tap: watch the pointer, capture and forward input),
@@ -45,8 +49,10 @@ crates/
                       encoder, asynchronous MFT, same D3D11 device: zero copy), d3d.rs (the
                       shared device), input.rs (SendInput), clipboard.rs, display.rs (virtual
                       monitors: Extend via the display configuration API, closest listed
-                      mode, removed on disconnect), driver.rs (installs the Virtual Display
-                      Driver with 3 monitors and a resolution list)
+                      mode, display scale 200% for HiDPI screens, removed on disconnect),
+                      driver.rs (installs the Virtual Display Driver with 3 monitors and a
+                      resolution list), system.rs (firewall rule, Run key, elevation, one
+                      running copy)
     platform/unsupported.rs   stubs (and the plan) for the Linux host
   client/   freemonplay-client: discovery, sessions, decoding, rendering, input, GUI
     app.rs            the app state machine and its windows ("displays")
@@ -275,6 +281,9 @@ refresh aren't included, so the real figure is somewhat higher.
 - `freemonplay-host --test-pattern`: streams a generated picture, no permissions needed.
 - CI (`.github/workflows/ci.yml`) builds the Mac menu bar app, the Mac client app
   (`bundle.sh --client`), the Windows client and its Inno Setup installer
-  (`build/windows/freemonplay.iss`; the icon is embedded by `crates/client/build.rs`), and
+  (`build/windows/freemonplay.iss`; the icon is embedded by `crates/client/build.rs`), the
+  Windows host installer (`build/windows/freemonplay-host.iss`, bundling the Virtual Display
+  Driver, pinned by version and checksum; `crates/host/build.rs` embeds the icon and a
+  manifest for Common Controls 6 and per-monitor DPI awareness), and
   the Linux client; `release.yml` publishes them for `v*` tags, with that version's
   changelog section as the notes.

@@ -1390,6 +1390,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "windows",
+ "winresource",
 ]
 
 [[package]]

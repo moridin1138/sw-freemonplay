@@ -96,7 +96,7 @@ On each device that should become a screen, install the client from the [latest 
 ./freemonplay-client
 ```
 
-To build the installers yourself: `./build/macos/bundle.sh --client` makes `target/freemonplay Screen.app`, and on Windows, [Inno Setup](https://jrsoftware.org/isinfo.php) compiles `build/windows/freemonplay.iss` (after a release build) into `dist/`.
+To build the installers yourself: `./build/macos/bundle.sh --client` makes `target/freemonplay Screen.app`, and on Windows, [Inno Setup](https://jrsoftware.org/isinfo.php) compiles `build/windows/freemonplay.iss` (the client) and `build/windows/freemonplay-host.iss` (the host, which also needs the unpacked driver; see the script) after a release build, into `dist/`.
 
 A window lists the computers running freemonplay on your network. Drag it to the monitor you want to use, click **Connect**, and enter the pairing code shown in the host's menu the first time (after that it reconnects without one). The screen fills that monitor; disconnecting brings the list back. Under **Monitors**, each of the device's monitors can be:
 - **Screen for the host:** another screen for the Mac (arrange them in its Display settings; they're remembered).
@@ -134,13 +134,13 @@ Quick test on one Mac: run the host, then `freemonplay-client --host 127.0.0.1 -
 
 ### Windows as the host (preview)
 
-A Windows PC can get extra screens too. Once, as administrator, install the [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT licensed, signed by the SignPath Foundation): unpack its `VirtualDisplayDriver-x86.Driver.Only.zip` and run
+A Windows PC can get extra screens too. Run `freemonplay-host-windows-x64-setup.exe` from the [latest release](https://github.com/moridin1138/sw-freemonplay/releases/latest). It asks for administrator rights once, to install the [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT licensed, signed by the SignPath Foundation; Windows may ask whether to trust its publisher) and a Windows Firewall rule for freemonplay. The driver is set up with three virtual monitors and common resolutions, including Mac Retina sizes.
 
-```powershell
-freemonplay-host --install-display-driver C:\path\to\VirtualDisplayDriver
-```
+freemonplay then lives in the notification area by the clock (under the ^ arrow if Windows hides it). Its menu matches the Mac's: the pairing code, connected screens with live stats and Disconnect, the codec, frame rate, input and clipboard settings, Start at Sign-in and the log. The first time, a setup dialog checks the driver and the firewall rule (installing either with one click) and shows the pairing code; **Setup Guide…** in the menu, or opening freemonplay again, brings it back.
 
-Windows asks once whether to trust the publisher. This sets the driver up with three virtual monitors and common resolutions (including Mac Retina sizes). Then run `freemonplay-host` normally (not as administrator): each screen that connects extends the desktop onto its own virtual monitor, removed again when it disconnects. Set a screen's scaling in Windows' Display settings; Windows remembers it. Without the driver, screens mirror the primary monitor. `--uninstall-display-driver` removes the device.
+Each screen that connects extends the desktop onto its own virtual monitor, removed again when it disconnects. HiDPI screens (a Retina Mac, or a PC at 150% or more) get 200% scaling, others 100%, so text appears the size it would on that screen. Without the driver, screens mirror the primary monitor.
+
+Without the installer, build `freemonplay-host` and run, as administrator, `freemonplay-host --install-display-driver <folder> --allow-firewall`, where the folder is the unpacked `VirtualDisplayDriver-x86.Driver.Only.zip` (or put it in a `driver` folder beside `freemonplay-host.exe` and use the setup dialog). `--uninstall-display-driver --remove-firewall` undoes both. `freemonplay-host --no-tray` runs in a terminal instead of the notification area.
 
 ## How it works
 
@@ -156,7 +156,8 @@ One QUIC connection per screen: the host captures its virtual display, hardware 
 - **HEVC on Linux clients** is offered automatically only with a VAAPI HEVC decoder (`vah265dec`/`vaapih265dec`); `--codec h265` forces it in software via `avdec_h265`.
 - **Bitrate control with the software encoder is loose.** Frame skipping is off to avoid stutter, and OpenH264 can't cap bitrate strictly without it. That's fine on a LAN.
 - **Linux packaging** is a tarball with a desktop entry; there's no AppImage or Flatpak yet.
-- **Windows and Linux hosts** aren't implemented yet (see `crates/host/src/platform/unsupported.rs` for the plan).
+- **The Windows host is a preview:** keyboard and mouse mode doesn't work with Windows as the host yet, and the virtual monitors come from a fixed set of three with a list of resolutions (screens with other sizes get the closest of the same shape).
+- **Linux hosts** aren't implemented yet (see `crates/host/src/platform/unsupported.rs` for the plan).
 - **Touch** maps to a single-finger mouse. Multi-touch gestures aren't forwarded.
 
 ## License

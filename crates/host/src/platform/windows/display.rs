@@ -111,7 +111,8 @@ fn primary() -> Result<VirtualDisplay> {
     }
 }
 
-fn driver_available() -> bool {
+/// Whether the Virtual Display Driver is installed (screens extend rather than mirror).
+pub fn driver_available() -> bool {
     Path::new(driver::SETTINGS_DIR).join("vdd_settings.xml").exists() && driver::device_count().unwrap_or(0) > 0
 }
 
@@ -162,6 +163,12 @@ fn attach_virtual(req: &DisplayRequest) -> Result<VirtualDisplay> {
         Ok(found) => {
             manager.in_use.insert(device.clone());
             remove_unused(manager);
+            // Text and windows at the size the screen's own display would show them.
+            let scale = scale_for(req);
+            match ccd::set_scale(&device, scale) {
+                Ok(()) => tracing::info!("{device}: display scale {scale}%"),
+                Err(e) => tracing::warn!("{device}: couldn't set the display scale to {scale}%: {e:#}"),
+            }
             found
         }
         Err(e) => {
@@ -204,6 +211,12 @@ fn best_mode(modes: &[(u32, u32)], width: u32, height: u32) -> Option<(u32, u32)
         .or_else(|| modes.iter().find(fits))
         .or_else(|| modes.last())
         .copied()
+}
+
+/// The display scale (percent) for a screen: 200% for a HiDPI one (a Retina Mac, or a
+/// Windows PC at 150% or more) so things appear the size they do there, else 100%.
+fn scale_for(req: &DisplayRequest) -> u32 {
+    if req.hidpi { 200 } else { 100 }
 }
 
 /// Removes virtual monitors that no session is using from the desktop.
@@ -349,8 +362,8 @@ mod ccd {
     use anyhow::{Result, bail};
     use windows::Win32::Devices::Display::{
         DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
-        DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
-        DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, DisplayConfigGetDeviceInfo,
+        DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_DEVICE_INFO_TYPE, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
+        DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, DisplayConfigGetDeviceInfo, DisplayConfigSetDeviceInfo,
         GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig, SDC_ALLOW_CHANGES, SDC_APPLY,
         SDC_SAVE_TO_DATABASE, SDC_TOPOLOGY_EXTEND, SDC_USE_SUPPLIED_DISPLAY_CONFIG, SetDisplayConfig,
     };
@@ -454,6 +467,72 @@ mod ccd {
         Ok(true)
     }
 
+    /// Windows' display scale steps, percent. The (undocumented, but long stable) scale
+    /// requests below count in steps relative to the monitor's recommended scale, as the
+    /// Settings app does.
+    const SCALES: [u32; 12] = [100, 125, 150, 175, 200, 225, 250, 300, 350, 400, 450, 500];
+    const GET_DPI_SCALE: i32 = -3;
+    const SET_DPI_SCALE: i32 = -4;
+
+    #[repr(C)]
+    struct GetDpiScale {
+        header: DISPLAYCONFIG_DEVICE_INFO_HEADER,
+        min_relative: i32,
+        current_relative: i32,
+        max_relative: i32,
+    }
+
+    #[repr(C)]
+    struct SetDpiScale {
+        header: DISPLAYCONFIG_DEVICE_INFO_HEADER,
+        relative: i32,
+    }
+
+    /// Sets the display scale of the monitor showing `device` (\\.\DISPLAYn) to the
+    /// nearest step to `percent` it allows.
+    pub fn set_scale(device: &str, percent: u32) -> Result<()> {
+        let (paths, _) = active()?;
+        let Some(path) = paths.iter().find(|p| source_name(p).eq_ignore_ascii_case(device)) else {
+            bail!("no active display path for {device}");
+        };
+        let header = |kind: i32, size: usize| DISPLAYCONFIG_DEVICE_INFO_HEADER {
+            r#type: DISPLAYCONFIG_DEVICE_INFO_TYPE(kind),
+            size: size as u32,
+            adapterId: path.sourceInfo.adapterId,
+            id: path.sourceInfo.id,
+        };
+        let mut get = GetDpiScale {
+            header: header(GET_DPI_SCALE, size_of::<GetDpiScale>()),
+            min_relative: 0,
+            current_relative: 0,
+            max_relative: 0,
+        };
+        // SAFETY: a correctly sized request packet.
+        let status = unsafe { DisplayConfigGetDeviceInfo(&mut get.header) };
+        if status != 0 {
+            bail!("reading the display scale failed ({status})");
+        }
+        let target = relative_step(get.min_relative, get.max_relative, percent);
+        if target == get.current_relative {
+            return Ok(());
+        }
+        let set = SetDpiScale { header: header(SET_DPI_SCALE, size_of::<SetDpiScale>()), relative: target };
+        // SAFETY: as above.
+        let status = unsafe { DisplayConfigSetDeviceInfo(&set.header) };
+        if status != 0 {
+            bail!("setting the display scale failed ({status})");
+        }
+        Ok(())
+    }
+
+    /// The step, relative to the recommended one, closest to `percent`. `min` is the
+    /// (negative) step of 100%, `max` that of the largest scale allowed.
+    pub(super) fn relative_step(min: i32, max: i32, percent: u32) -> i32 {
+        let recommended = -min;
+        let wanted = SCALES.iter().enumerate().min_by_key(|(_, s)| s.abs_diff(percent)).map_or(0, |(i, _)| i as i32);
+        (wanted - recommended).clamp(min, max)
+    }
+
     pub fn log_paths() {
         let Ok((paths, _)) = active() else { return };
         for p in &paths {
@@ -477,5 +556,14 @@ mod tests {
         assert_eq!(best_mode(&MODES, 1600, 1000), Some((1280, 800)));
         assert_eq!(best_mode(&MODES, 1000, 700), Some((1280, 800)));
         assert_eq!(best_mode(&[], 1000, 700), None);
+    }
+
+    #[test]
+    fn scale_steps_are_relative_to_the_recommended_one() {
+        // Recommended 150% (step 2): 100% is -2, 200% is +2.
+        assert_eq!(ccd::relative_step(-2, 5, 100), -2);
+        assert_eq!(ccd::relative_step(-2, 5, 200), 2);
+        // Recommended 100%, but at most 175% allowed.
+        assert_eq!(ccd::relative_step(0, 3, 200), 3);
     }
 }

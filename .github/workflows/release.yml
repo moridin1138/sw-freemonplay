@@ -28,6 +28,8 @@ jobs:
           cat > notes.md <<'EOF'
           **Mac (the computer that wants more screens):** open `freemonplay-macos.dmg` and drag freemonplay to Applications. The first time, right-click it and choose Open (it isn't notarized by Apple yet).
 
+          **Windows PC (preview, the computer that wants more screens):** run `freemonplay-host-windows-x64-setup.exe`. It asks for administrator rights once, to install the Virtual Display Driver (so screens extend the desktop) and a firewall rule. freemonplay then lives in the notification area by the clock.
+
           **Screens:** on each device that should become a screen (or take the Mac's keyboard and mouse):
           - **Windows:** run `freemonplay-screen-windows-x64-setup.exe` (no administrator rights needed; a newer one updates in place). SmartScreen may warn because it isn't signed; choose More info, then Run anyway. `freemonplay-screen-windows-x64.zip` is the same program without an installer.
           - **Mac:** open `freemonplay-screen-macos.dmg`, drag freemonplay Screen to Applications, and right-click > Open the first time.

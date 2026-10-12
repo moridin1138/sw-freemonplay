@@ -66,7 +66,7 @@ fn restart_devices() -> Result<()> {
         Ok(())
     })?;
     for id in ids {
-        let status = std::process::Command::new("pnputil").args(["/restart-device", &id]).output()?;
+        let status = super::system::quiet_command("pnputil").args(["/restart-device", &id]).output()?;
         if !status.status.success() {
             bail!("couldn't restart {id}: {}", String::from_utf8_lossy(&status.stdout).trim());
         }
@@ -126,7 +126,7 @@ fn prepare_settings_dir(package: &Path) -> Result<()> {
     let template = std::fs::read_to_string(package.join("vdd_settings.xml")).context("no vdd_settings.xml in the package")?;
     std::fs::write(Path::new(SETTINGS_DIR).join("vdd_settings.xml"), settings(&template))?;
     // Builtin Users (S-1-5-32-545): modify, inherited by files.
-    let status = std::process::Command::new("icacls").args([SETTINGS_DIR, "/grant", "*S-1-5-32-545:(OI)(CI)M"]).output()?;
+    let status = super::system::quiet_command("icacls").args([SETTINGS_DIR, "/grant", "*S-1-5-32-545:(OI)(CI)M"]).output()?;
     if !status.status.success() {
         bail!("couldn't let users change {SETTINGS_DIR}");
     }

@@ -8,10 +8,11 @@
 mod capture;
 pub mod clipboard;
 mod d3d;
-mod display;
+pub mod display;
 pub mod driver;
 mod encoder;
 mod input;
+pub mod system;
 
 use anyhow::Result;
 use windows::Win32::System::Com::CoIncrementMTAUsage;

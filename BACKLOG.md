@@ -9,8 +9,9 @@ Roughly in priority order. Done items move to [CHANGELOG.md](CHANGELOG.md).
 - **Keep client screens awake.** Tested on macOS. Windows (`SetThreadExecutionState`) and Linux (D-Bus ScreenSaver inhibit, with GNOME session manager fallback) still need checking on real machines.
 
 - **Windows host.** Extends the desktop onto virtual monitors from the Virtual Display Driver (signed by SignPath; installed with `--install-display-driver`), hardware encoded with zero copy; tested Surface to MacBook Air. Learned the hard way: that driver can't be reconfigured while running (its reload command blocks its only control thread when monitors exist), so the installer fixes 3 monitors and a resolution list, and Windows rejects monitors offering too many modes (keep one global refresh rate). Next:
-  - **A tray app** like the Mac menu bar (pairing code, screens, settings, log), and an installer that includes the driver (driver install needs administrator rights once) and adds the firewall rule.
-  - **Display scaling:** Windows picks 100% for a new 2940x1912 monitor; set a sensible scale for HiDPI clients automatically.
+  - **Test the tray app and installer on a clean PC** (built and run on the Surface; the installer is only built by CI).
+  - **Finer scaling:** the client only says whether it's HiDPI, so screens get 100% or 200%. Sending the client's own scale (e.g. 150%) would match it exactly (a protocol change).
+  - The setup dialog only recognises its own firewall rule, not one made by accepting Windows' "allow access" prompt.
   - **Our own SudoVDA-based driver**, signed via SignPath, for true per-client monitors with stable identities (no fixed count or resolution list).
   - Keyboard and mouse mode with Windows as the host (low-level input hooks).
 
