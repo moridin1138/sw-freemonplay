@@ -25,4 +25,7 @@ in the same change, before handing over a commit:
   the Windows cross-build, and `freemonplay-screen --self-test` when decoding or
   rendering changed.
 - The user commits and pushes; prepare the commit and give them the commands.
-- Writing style: no em-dashes or en-dashes; metric units.
+- Writing style: no em-dashes or en-dashes; metric units. Keep app text short.
+- Text people see goes in `locales/en.yml` (`screen.*` and `host.*` keys, used with
+  `t!(...)`), with translations in the other files in `locales/`; `cargo test` checks them.
+  Logs stay in English.

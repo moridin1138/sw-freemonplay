@@ -19,6 +19,7 @@ use objc2_foundation::{NSData, NSObject, NSObjectProtocol, NSSize, NSString, NST
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
 use fmp_proto::Edge;
+use rust_i18n::t;
 
 use crate::encoder::CodecChoice;
 use crate::registry::KvmRole;
@@ -32,14 +33,21 @@ const FPS_CHOICES: [u32; 4] = [30, 60, 90, 120];
 const MENUBAR_ICON_PDF: &[u8] = include_bytes!("../../../build/macos/icon/menubar.pdf");
 /// Where a keyboard-and-mouse-only screen's monitors sit relative to the main display.
 const KVM_SIDES: [(Edge, &str); 4] = [
-    (Edge::Right, "Right of the main display"),
-    (Edge::Left, "Left of the main display"),
-    (Edge::Top, "Above the main display"),
-    (Edge::Bottom, "Below the main display"),
+    (Edge::Right, "host.side.right"),
+    (Edge::Left, "host.side.left"),
+    (Edge::Top, "host.side.top"),
+    (Edge::Bottom, "host.side.bottom"),
 ];
 
-const CODEC_CHOICES: [(CodecChoice, &str); 3] =
-    [(CodecChoice::Auto, "Automatic"), (CodecChoice::H264, "H.264"), (CodecChoice::H265, "HEVC")];
+const CODEC_CHOICES: [CodecChoice; 3] = [CodecChoice::Auto, CodecChoice::H264, CodecChoice::H265];
+
+fn codec_label(codec: CodecChoice) -> String {
+    match codec {
+        CodecChoice::Auto => t!("host.menu.automatic").into_owned(),
+        CodecChoice::H264 => "H.264".into(),
+        CodecChoice::H265 => "HEVC".into(),
+    }
+}
 
 pub fn run(ctx: Arc<Ctx>, log: PathBuf) {
     let mtm = MainThreadMarker::new().expect("the menu bar must run on the main thread");
@@ -223,7 +231,7 @@ define_class!(
 
         #[unsafe(method(setCodec:))]
         fn set_codec(&self, sender: &NSMenuItem) {
-            if let Some(&(codec, _)) = CODEC_CHOICES.get(sender.tag() as usize) {
+            if let Some(&codec) = CODEC_CHOICES.get(sender.tag() as usize) {
                 self.ivars().ctx.update_settings(|s| s.codec = codec);
             }
         }
@@ -250,12 +258,10 @@ define_class!(
         fn forget_all(&self, _sender: &NSMenuItem) {
             let mtm = self.mtm();
             let alert = NSAlert::new(mtm);
-            alert.setMessageText(&NSString::from_str("Forget all paired screens?"));
-            alert.setInformativeText(&NSString::from_str(
-                "They'll need the pairing code to connect again. Screens connected now stay connected.",
-            ));
-            alert.addButtonWithTitle(&NSString::from_str("Forget"));
-            alert.addButtonWithTitle(&NSString::from_str("Cancel"));
+            alert.setMessageText(&NSString::from_str(&t!("host.forget.title")));
+            alert.setInformativeText(&NSString::from_str(&t!("host.forget.body")));
+            alert.addButtonWithTitle(&NSString::from_str(&t!("host.forget.button")));
+            alert.addButtonWithTitle(&NSString::from_str(&t!("host.cancel")));
             activate(mtm);
             if alert.runModal() == NSAlertFirstButtonReturn {
                 match self.ivars().ctx.store.forget_all() {
@@ -355,9 +361,9 @@ impl Controller {
         let Some(button) = item.as_ref().and_then(|i| i.button(self.mtm())) else { return };
         button.setTitle(&NSString::from_str(&if count > 0 { format!(" {count}") } else { String::new() }));
         let tip = match count {
-            0 => format!("Freemonplay on {}: waiting for screens", ctx.host_name),
-            1 => format!("Freemonplay on {}: 1 screen connected", ctx.host_name),
-            n => format!("Freemonplay on {}: {n} screens connected", ctx.host_name),
+            0 => t!("host.tip.none", host = ctx.host_name),
+            1 => t!("host.tip.one", host = ctx.host_name),
+            n => t!("host.tip.many", host = ctx.host_name, count = n),
         };
         button.setToolTip(Some(&NSString::from_str(&tip)));
     }
@@ -367,25 +373,25 @@ impl Controller {
         let settings = ctx.settings();
         menu.removeAllItems();
 
-        menu.addItem(&self.item(&format!("Freemonplay on {} (port {})", ctx.host_name, ctx.port), None, 0));
-        let code = self.item(&format!("Pairing code: {}", ctx.store.pairing_code()), Some(sel!(copyCode:)), 0);
-        code.setToolTip(Some(&NSString::from_str("Click to copy. New screens enter this code once.")));
+        menu.addItem(&self.item(&t!("host.menu.header", host = ctx.host_name, port = ctx.port), None, 0));
+        let code = self.item(&t!("host.menu.code", code = welcome::format_code(&ctx.store.pairing_code())), Some(sel!(copyCode:)), 0);
+        code.setToolTip(Some(&NSString::from_str(&t!("host.menu.code_tip"))));
         menu.addItem(&code);
         menu.addItem(&NSMenuItem::separatorItem(self.mtm()));
 
         let sessions = ctx.registry.snapshot();
         if sessions.is_empty() {
-            menu.addItem(&self.item("No screens connected", None, 0));
+            menu.addItem(&self.item(&t!("host.menu.no_screens"), None, 0));
         } else if let Some(network) = crate::platform::network::describe() {
-            menu.addItem(&self.item(&format!("This Mac's network: {}", network.summary), None, 0));
+            menu.addItem(&self.item(&t!("host.menu.network_mac", summary = network.summary), None, 0));
             for tip in &network.advice {
-                menu.addItem(&self.item(&format!("    Tip: {tip}"), None, 0));
+                menu.addItem(&self.item(&format!("    {}", t!("host.menu.tip", tip = tip)), None, 0));
             }
         }
         for s in sessions {
             let details = NSMenu::new(self.mtm());
             details.setAutoenablesItems(false);
-            for line in s.details("This Mac") {
+            for line in s.details() {
                 match line {
                     Some(text) => details.addItem(&self.item(&text, None, 0)),
                     None => details.addItem(&NSMenuItem::separatorItem(self.mtm())),
@@ -394,23 +400,23 @@ impl Controller {
             match s.kvm {
                 Some(KvmRole::Mixed) => {
                     details.addItem(&NSMenuItem::separatorItem(self.mtm()));
-                    details.addItem(&self.item("Keyboard and mouse: move off this screen's edges onto that computer's other monitors", None, 0));
-                    details.addItem(&self.item("    Ctrl+Alt+Shift+K brings them back", None, 0));
+                    details.addItem(&self.item(&t!("host.menu.kvm_mixed"), None, 0));
+                    details.addItem(&self.item(&format!("    {}", t!("host.menu.kvm_back", keys = crate::shortcut('K'))), None, 0));
                 }
                 Some(KvmRole::Beside(current)) => {
                     details.addItem(&NSMenuItem::separatorItem(self.mtm()));
-                    details.addItem(&self.item("Keyboard and mouse: its monitors sit", None, 0));
+                    details.addItem(&self.item(&t!("host.menu.kvm_beside"), None, 0));
                     for (i, (side, label)) in KVM_SIDES.iter().enumerate() {
-                        let item = self.item(&format!("    {label}"), Some(sel!(setKvmSide:)), (s.id * 4 + i as u64) as isize);
+                        let item = self.item(&format!("    {}", t!(*label)), Some(sel!(setKvmSide:)), (s.id * 4 + i as u64) as isize);
                         item.setState(if current == *side { NSControlStateValueOn } else { NSControlStateValueOff });
                         details.addItem(&item);
                     }
-                    details.addItem(&self.item("    Ctrl+Alt+Shift+K brings them back", None, 0));
+                    details.addItem(&self.item(&format!("    {}", t!("host.menu.kvm_back", keys = crate::shortcut('K'))), None, 0));
                 }
                 None => {}
             }
             details.addItem(&NSMenuItem::separatorItem(self.mtm()));
-            details.addItem(&self.item("Disconnect", Some(sel!(disconnect:)), s.id as isize));
+            details.addItem(&self.item(&t!("host.menu.disconnect"), Some(sel!(disconnect:)), s.id as isize));
             let entry = self.item(&s.title(), Some(sel!(tick:)), 0);
             entry.setSubmenu(Some(&details));
             menu.addItem(&entry);
@@ -418,13 +424,13 @@ impl Controller {
         menu.addItem(&NSMenuItem::separatorItem(self.mtm()));
 
         let codec_menu = NSMenu::new(self.mtm());
-        for (i, (codec, label)) in CODEC_CHOICES.iter().enumerate() {
-            let item = self.item(label, Some(sel!(setCodec:)), i as isize);
+        for (i, codec) in CODEC_CHOICES.iter().enumerate() {
+            let item = self.item(&codec_label(*codec), Some(sel!(setCodec:)), i as isize);
             item.setState(if settings.codec == *codec { NSControlStateValueOn } else { NSControlStateValueOff });
             item.setEnabled(ctx.overrides.codec.is_none());
             codec_menu.addItem(&item);
         }
-        let codec = self.item("Video Codec", Some(sel!(tick:)), 0);
+        let codec = self.item(&t!("host.menu.codec"), Some(sel!(tick:)), 0);
         codec.setSubmenu(Some(&codec_menu));
         menu.addItem(&codec);
 
@@ -435,41 +441,38 @@ impl Controller {
             item.setEnabled(ctx.overrides.max_fps.is_none());
             fps_menu.addItem(&item);
         }
-        let fps = self.item("Maximum Frame Rate", Some(sel!(tick:)), 0);
+        let fps = self.item(&t!("host.menu.fps"), Some(sel!(tick:)), 0);
         fps.setSubmenu(Some(&fps_menu));
         menu.addItem(&fps);
 
-        let input = self.item("Allow Control from Screens", Some(sel!(toggleInput:)), 0);
+        let input = self.item(&t!("host.menu.allow_input"), Some(sel!(toggleInput:)), 0);
         input.setState(if settings.allow_input { NSControlStateValueOn } else { NSControlStateValueOff });
         input.setEnabled(!ctx.overrides.no_input);
-        input.setToolTip(Some(&NSString::from_str("Mouse, keyboard and touch on a screen control this Mac.")));
+        input.setToolTip(Some(&NSString::from_str(&t!("host.menu.allow_input_tip"))));
         menu.addItem(&input);
-        let clipboard = self.item("Share Clipboard with Screens", Some(sel!(toggleClipboard:)), 0);
+        let clipboard = self.item(&t!("host.menu.clipboard"), Some(sel!(toggleClipboard:)), 0);
         clipboard.setState(if settings.share_clipboard { NSControlStateValueOn } else { NSControlStateValueOff });
-        clipboard.setToolTip(Some(&NSString::from_str(
-            "Text copied here can be pasted on the screens' computers, and the other way round. \
-             Passwords copied from password managers are never shared.",
-        )));
+        clipboard.setToolTip(Some(&NSString::from_str(&t!("host.menu.clipboard_tip"))));
         menu.addItem(&clipboard);
-        menu.addItem(&self.item("Changes apply to screens that connect next.", None, 0));
+        menu.addItem(&self.item(&t!("host.menu.next_time"), None, 0));
         menu.addItem(&NSMenuItem::separatorItem(self.mtm()));
 
-        menu.addItem(&self.item("New Pairing Code (and Copy)", Some(sel!(newCode:)), 0));
+        menu.addItem(&self.item(&t!("host.menu.new_code"), Some(sel!(newCode:)), 0));
         let paired = ctx.store.paired_count();
-        let forget = self.item(&format!("Forget Paired Screens ({paired})…"), Some(sel!(forgetAll:)), 0);
+        let forget = self.item(&t!("host.menu.forget", count = paired), Some(sel!(forgetAll:)), 0);
         forget.setEnabled(paired > 0);
         menu.addItem(&forget);
         if crate::launched_from_app_bundle() {
-            let login = self.item("Open at Login", Some(sel!(toggleLogin:)), 0);
+            let login = self.item(&t!("host.menu.login_mac"), Some(sel!(toggleLogin:)), 0);
             // SAFETY: reading this app's own login item status.
             let enabled = unsafe { SMAppService::mainAppService().status() } == SMAppServiceStatus::Enabled;
             login.setState(if enabled { NSControlStateValueOn } else { NSControlStateValueOff });
             menu.addItem(&login);
         }
-        menu.addItem(&self.item("Setup Guide…", Some(sel!(showWelcome:)), 0));
-        menu.addItem(&self.item("Show Log", Some(sel!(showLog:)), 0));
+        menu.addItem(&self.item(&t!("host.menu.setup"), Some(sel!(showWelcome:)), 0));
+        menu.addItem(&self.item(&t!("host.menu.log"), Some(sel!(showLog:)), 0));
         menu.addItem(&NSMenuItem::separatorItem(self.mtm()));
-        let quit = self.item("Quit Freemonplay", Some(sel!(quit:)), 0);
+        let quit = self.item(&t!("host.menu.quit"), Some(sel!(quit:)), 0);
         quit.setKeyEquivalent(&NSString::from_str("q"));
         menu.addItem(&quit);
     }

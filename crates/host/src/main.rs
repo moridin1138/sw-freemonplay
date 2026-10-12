@@ -39,6 +39,26 @@ use fmp_proto::{ALPN, DEFAULT_PORT, PROTOCOL_VERSION, SERVICE_TYPE};
 use session::{Ctx, Overrides};
 use store::HostStore;
 
+// The app's text in each language: one file per language in the repository's locales
+// folder, shared with the screen app.
+rust_i18n::i18n!("../../locales", fallback = "en");
+
+/// Uses the OS's language when there's a translation for it, else English. `FMP_LANG`
+/// overrides it (e.g. `FMP_LANG=de`), for trying translations.
+fn set_language() {
+    let wanted = std::env::var("FMP_LANG").ok().or_else(sys_locale::get_locale).unwrap_or_default();
+    let available = rust_i18n::available_locales!();
+    let available: Vec<&str> = available.iter().map(|l| l.as_ref()).collect();
+    let language = fmp_proto::language::pick(&wanted, &available);
+    tracing::info!("language: {language} (system: {wanted})");
+    rust_i18n::set_locale(language);
+}
+
+/// Keyboard shortcut text with this OS's key names.
+pub(crate) fn shortcut(key: char) -> String {
+    if cfg!(target_os = "macos") { format!("Control+Option+Shift+{key}") } else { format!("Ctrl+Alt+Shift+{key}") }
+}
+
 #[derive(Parser)]
 #[command(version, about)]
 struct Args {
@@ -161,7 +181,7 @@ fn main() -> Result<()> {
     let result = run(args, gui);
     #[cfg(target_os = "windows")]
     if gui && let Err(e) = &result {
-        platform::system::error_box(&format!("Freemonplay Host couldn't start: {e:#}"));
+        platform::system::error_box(&rust_i18n::t!("host.error.start", error = format!("{e:#}")));
     }
     result
 }
@@ -186,6 +206,7 @@ fn windows_setup(args: &Args) -> Result<()> {
 
 fn run(args: Args, gui: bool) -> Result<()> {
     init_logging(gui)?;
+    set_language();
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     if let Some(size) = &args.probe_display {

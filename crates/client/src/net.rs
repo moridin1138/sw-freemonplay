@@ -11,6 +11,7 @@ use fmp_proto::{
     MAX_CLIPBOARD_IMAGE_BYTES, SERVICE_TYPE, ScreenId, VideoFrame, pairing,
     read_msg, write_msg,
 };
+use rust_i18n::t;
 use rustls::DigitallySignedStruct;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::CryptoProvider;
@@ -388,7 +389,13 @@ pub async fn run(mut s: Session) -> Result<String> {
             if kind == RejectKind::NotPaired {
                 let _ = s.store.lock().unwrap().forget(&s.connected.fingerprint);
             }
-            bail!("host refused: {reason}");
+            let message = match kind {
+                RejectKind::NotPaired => t!("screen.message.not_paired").into_owned(),
+                RejectKind::WrongCode => t!("screen.message.wrong_code").into_owned(),
+                RejectKind::VersionMismatch => t!("screen.message.version").into_owned(),
+                _ => reason,
+            };
+            bail!("{message}");
         }
         Some(HostMsg::Notice { message }) => bail!("unexpected notice before welcome: {message}"),
         Some(HostMsg::PairingChallenge { .. }) => bail!("host asked to pair twice"),

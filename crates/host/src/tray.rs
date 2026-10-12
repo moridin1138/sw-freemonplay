@@ -27,6 +27,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTALIGN, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WINDOW_EX_STYLE,
     WM_APP, WM_CLOSE, WM_CONTEXTMENU, WM_ENDSESSION, WM_NULL, WM_QUERYENDSESSION, WM_TIMER, WM_USER, WNDCLASSW, WS_OVERLAPPED,
 };
+use rust_i18n::t;
 use windows::core::{HSTRING, PCWSTR, w};
 
 use crate::encoder::CodecChoice;
@@ -45,8 +46,15 @@ const NIN_KEYSELECT: u32 = WM_USER + 1;
 const TIMER: usize = 1;
 
 const FPS_CHOICES: [u32; 4] = [30, 60, 90, 120];
-const CODEC_CHOICES: [(CodecChoice, &str); 3] =
-    [(CodecChoice::Auto, "Automatic"), (CodecChoice::H264, "H.264"), (CodecChoice::H265, "HEVC")];
+const CODEC_CHOICES: [CodecChoice; 3] = [CodecChoice::Auto, CodecChoice::H264, CodecChoice::H265];
+
+fn codec_label(codec: CodecChoice) -> String {
+    match codec {
+        CodecChoice::Auto => t!("host.menu.automatic").into_owned(),
+        CodecChoice::H264 => "H.264".into(),
+        CodecChoice::H265 => "HEVC".into(),
+    }
+}
 /// Where to get the client for other devices.
 const DOWNLOAD_URL: &str = "https://github.com/moridin1138/sw-freemonplay/releases/latest";
 /// Where to get the display driver when the installer didn't bring it.
@@ -108,7 +116,7 @@ pub fn run(ctx: Arc<Ctx>, log: PathBuf) {
         ) {
             Ok(hwnd) => hwnd,
             Err(e) => {
-                system::error_box(&format!("Freemonplay Host couldn't start its tray icon: {e}"));
+                system::error_box(&t!("host.error.start", error = e.to_string()));
                 return;
             }
         };
@@ -232,9 +240,9 @@ impl Tray {
     fn tip(&self) -> String {
         let ctx = &self.ctx;
         match ctx.registry.len() {
-            0 => format!("Freemonplay on {}: waiting for screens", ctx.host_name),
-            1 => format!("Freemonplay on {}: 1 screen connected", ctx.host_name),
-            n => format!("Freemonplay on {}: {n} screens connected", ctx.host_name),
+            0 => t!("host.tip.none", host = ctx.host_name).into_owned(),
+            1 => t!("host.tip.one", host = ctx.host_name).into_owned(),
+            n => t!("host.tip.many", host = ctx.host_name, count = n).into_owned(),
         }
     }
 
@@ -248,55 +256,55 @@ impl Tray {
         let settings = ctx.settings();
         let mut menu = Menu::new();
 
-        menu.info(&format!("Freemonplay on {} (port {})", ctx.host_name, ctx.port));
-        menu.item(&format!("Pairing code: {} (click to copy)", format_code(&ctx.store.pairing_code())), Action::CopyCode, false);
+        menu.info(&t!("host.menu.header", host = ctx.host_name, port = ctx.port));
+        menu.item(&t!("host.menu.copy_code", code = format_code(&ctx.store.pairing_code())), Action::CopyCode, false);
         menu.separator();
 
         let sessions = ctx.registry.snapshot();
         if sessions.is_empty() {
-            menu.info("No screens connected");
+            menu.info(&t!("host.menu.no_screens"));
         }
         for s in sessions {
             let mut details = Menu::sub(&mut menu);
-            for line in s.details("This PC") {
+            for line in s.details() {
                 match line {
                     Some(text) => details.info(&text),
                     None => details.separator(),
                 }
             }
             details.separator();
-            details.item("Disconnect", Action::Disconnect(s.id), false);
+            details.item(&t!("host.menu.disconnect"), Action::Disconnect(s.id), false);
             menu.submenu(&s.title(), details);
         }
         if !display::driver_available() {
             menu.separator();
-            menu.item("Screens copy the main display: install the display driver…", Action::Setup, false);
+            menu.item(&t!("host.menu.install_driver"), Action::Setup, false);
         }
         menu.separator();
 
         let mut codecs = Menu::sub(&mut menu);
-        for (codec, label) in CODEC_CHOICES {
-            codecs.add(label, Some(Action::Codec(codec)), settings.codec == codec, ctx.overrides.codec.is_none());
+        for codec in CODEC_CHOICES {
+            codecs.add(&codec_label(codec), Some(Action::Codec(codec)), settings.codec == codec, ctx.overrides.codec.is_none());
         }
-        menu.submenu("Video Codec", codecs);
+        menu.submenu(&t!("host.menu.codec"), codecs);
         let mut rates = Menu::sub(&mut menu);
         for fps in FPS_CHOICES {
             rates.add(&format!("{fps} fps"), Some(Action::Fps(fps)), settings.max_fps == fps, ctx.overrides.max_fps.is_none());
         }
-        menu.submenu("Maximum Frame Rate", rates);
-        menu.add("Allow Control from Screens", Some(Action::ToggleInput), settings.allow_input, !ctx.overrides.no_input);
-        menu.item("Share Clipboard with Screens", Action::ToggleClipboard, settings.share_clipboard);
-        menu.info("Changes apply to screens that connect next.");
+        menu.submenu(&t!("host.menu.fps"), rates);
+        menu.add(&t!("host.menu.allow_input"), Some(Action::ToggleInput), settings.allow_input, !ctx.overrides.no_input);
+        menu.item(&t!("host.menu.clipboard"), Action::ToggleClipboard, settings.share_clipboard);
+        menu.info(&t!("host.menu.next_time"));
         menu.separator();
 
-        menu.item("New Pairing Code (and Copy)", Action::NewCode, false);
+        menu.item(&t!("host.menu.new_code"), Action::NewCode, false);
         let paired = ctx.store.paired_count();
-        menu.add(&format!("Forget Paired Screens ({paired})…"), Some(Action::ForgetAll), false, paired > 0);
-        menu.item("Start at Sign-in", Action::ToggleLogin, system::start_at_login());
-        menu.item("Setup Guide…", Action::Setup, false);
-        menu.item("Show Log", Action::ShowLog, false);
+        menu.add(&t!("host.menu.forget", count = paired), Some(Action::ForgetAll), false, paired > 0);
+        menu.item(&t!("host.menu.login_pc"), Action::ToggleLogin, system::start_at_login());
+        menu.item(&t!("host.menu.setup"), Action::Setup, false);
+        menu.item(&t!("host.menu.log"), Action::ShowLog, false);
         menu.separator();
-        menu.item("Quit Freemonplay", Action::Quit, false);
+        menu.item(&t!("host.menu.quit"), Action::Quit, false);
 
         let mut at = POINT::default();
         // SAFETY: showing our popup menu at the pointer. Windows needs our window in front
@@ -334,8 +342,8 @@ impl Tray {
                 ctx.clipboard.set_enabled(ctx.settings().share_clipboard);
             }
             Action::ForgetAll => {
-                let question = "Forget all paired screens?\n\nThey'll need the pairing code to connect again. Screens connected now stay connected.";
-                if system::confirm(self.hwnd, question) {
+                let question = format!("{}\n\n{}", t!("host.forget.title"), t!("host.forget.body"));
+                if system::confirm(self.hwnd, &question) {
                     match ctx.store.forget_all() {
                         Ok(()) => tracing::info!("forgot all paired clients"),
                         Err(e) => tracing::error!("couldn't forget paired clients: {e:#}"),
@@ -377,49 +385,37 @@ impl Tray {
             let code = format_code(&self.ctx.store.pairing_code());
 
             let content = format!(
-                "This PC gets extra screens: other computers and tablets on your network show them over Wi-Fi or Ethernet.\n\n\
-                 1. Display driver: {}\n\
-                 2. Windows Firewall: {}\n\
-                 3. Connect a screen: on the other device, install Freemonplay Screen, open it and pick this PC. \
-                 The first time, it asks for the pairing code {code}.",
-                if driver {
-                    "✓ Installed"
-                } else {
-                    "not installed yet. Without it, screens copy this PC's main display instead of extending it."
-                },
-                if firewall { "✓ Screens can connect" } else { "not allowed yet. Windows may block screens from connecting." },
+                "{}\n\n{}",
+                t!("host.welcome.subtitle_pc"),
+                t!(
+                    "host.setup.status",
+                    driver = if driver { t!("host.setup.driver_ok") } else { t!("host.setup.driver_missing") },
+                    firewall = if firewall { t!("host.setup.firewall_ok") } else { t!("host.setup.firewall_missing") },
+                    code = code,
+                ),
             );
             let mut buttons: Vec<(i32, HSTRING)> = Vec::new();
             if !driver {
-                buttons.push(match package {
-                    Some(_) => (
-                        INSTALL,
-                        "Install the display driver\nScreens then extend the desktop. Windows asks for administrator rights once.".into(),
-                    ),
-                    None => (
-                        INSTALL,
-                        "Get the display driver\nDownload VirtualDisplayDriver-x86.Driver.Only.zip and unpack it into a \"driver\" folder beside freemonplay-host.exe, then come back here.".into(),
-                    ),
-                });
+                let text = if package.is_some() { t!("host.setup.install_driver") } else { t!("host.setup.get_driver") };
+                buttons.push((INSTALL, HSTRING::from(&*text)));
             }
             if !firewall {
-                buttons.push((FIREWALL, "Let screens through Windows Firewall\nWindows asks for administrator rights once.".into()));
+                buttons.push((FIREWALL, HSTRING::from(&*t!("host.setup.firewall"))));
             }
-            buttons.push((COPY, format!("Copy the pairing code\n{code}").into()));
-            buttons.push((DOWNLOAD, "Get Freemonplay Screen for the other devices\nOpens the download page.".into()));
+            buttons.push((COPY, HSTRING::from(&*t!("host.setup.copy", code = code))));
+            buttons.push((DOWNLOAD, HSTRING::from(&*t!("host.setup.get_screen"))));
             let raw: Vec<TASKDIALOG_BUTTON> =
                 buttons.iter().map(|(id, text)| TASKDIALOG_BUTTON { nButtonID: *id, pszButtonText: PCWSTR(text.as_ptr()) }).collect();
             let content = HSTRING::from(content);
-            let footer = HSTRING::from(
-                "Freemonplay stays in the notification area by the clock (under the ^ arrow if it's hidden). Setup Guide… in its menu reopens this.",
-            );
+            let footer = HSTRING::from(&*t!("host.setup.footer"));
+            let (window_title, title) = (HSTRING::from(&*t!("host.welcome.window")), HSTRING::from(&*t!("host.welcome.title")));
             let config = TASKDIALOGCONFIG {
                 cbSize: size_of::<TASKDIALOGCONFIG>() as u32,
                 dwFlags: TDF_USE_COMMAND_LINKS | TDF_USE_HICON_MAIN | TDF_ALLOW_DIALOG_CANCELLATION,
                 dwCommonButtons: TDCBF_CLOSE_BUTTON,
-                pszWindowTitle: w!("Welcome to Freemonplay"),
+                pszWindowTitle: PCWSTR(window_title.as_ptr()),
                 Anonymous1: TASKDIALOGCONFIG_0 { hMainIcon: self.big_icon },
-                pszMainInstruction: w!("Set up Freemonplay"),
+                pszMainInstruction: PCWSTR(title.as_ptr()),
                 pszContent: PCWSTR(content.as_ptr()),
                 cButtons: raw.len() as u32,
                 pButtons: raw.as_ptr(),

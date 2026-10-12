@@ -9,6 +9,9 @@ publishes it as the release notes.
 Hosts and screens must both be updated: the protocol changed (version 11).
 
 ### Changed
+- **Shorter, clearer text** throughout both apps: menus, the setup windows, the screen
+  app's window and its messages. A rejected pairing or a version mismatch now says what to
+  do about it.
 - **New names: Freemonplay Host and Freemonplay Screen.** The Mac apps are now
   "Freemonplay Host.app" (was "freemonplay.app") and "Freemonplay Screen.app", the Mac host
   download is `freemonplay-host-macos.dmg`, and the screen's command is `freemonplay-screen`
@@ -16,7 +19,11 @@ Hosts and screens must both be updated: the protocol changed (version 11).
   Pairings and settings carry over.
 - **Disconnecting is easier:** move the pointer to the top edge of a screen for a toolbar
   with the host's name, the stream's size, codec and frame rate, and Full Screen and
-  Disconnect buttons. The list then says which computer you disconnected from.
+  Disconnect buttons ("Show a toolbar at the top edge" in Options turns it off). The list
+  then says which computer you disconnected from.
+- **The screen app remembers its options** (full screen, sharpness, codec, keeping awake,
+  clipboard, toolbar, waiting for the refresh) between launches. Command line flags still
+  win for that run.
 - **Logs say more:** the screen app now keeps a log file (Show log at the bottom of its
   window), the host logs why each session ended (closed by the screen, timed out, closed
   from the menu), and both start a fresh file once the log passes 5 MB.
@@ -27,6 +34,9 @@ Hosts and screens must both be updated: the protocol changed (version 11).
   and Linux windows show the app icon too.
 
 ### Added
+- **Languages:** both apps now speak English, German, Spanish, French, Turkish and
+  Simplified Chinese, following the computer's language. Translations live in the
+  `locales` folder, one file per language; CONTRIBUTING.md explains how to add one.
 - **Release signing, ready to switch on:** tagged releases sign the Windows programs and
   installers through the SignPath Foundation, and Developer ID sign and notarize the Mac
   apps and disk images, once the accounts and secrets in SIGNING.md exist. The README has

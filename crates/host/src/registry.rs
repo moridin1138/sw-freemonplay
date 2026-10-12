@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use fmp_proto::{ClientStats, Codec, Edge, NetworkInfo};
 
+use rust_i18n::t;
+
 use crate::platform::Activity;
 
 #[derive(Clone, Debug)]
@@ -53,43 +55,42 @@ impl SessionInfo {
         format!("{}: {}×{} {}{rate}{latency}", self.client_name, self.width, self.height, self.codec)
     }
 
-    /// The session's details for its submenu; `None` is a separator. `this` names the host
-    /// computer ("This Mac").
-    pub fn details(&self, this: &str) -> Vec<Option<String>> {
+    /// The session's details for its submenu; `None` is a separator.
+    pub fn details(&self) -> Vec<Option<String>> {
         let mut lines = vec![
-            Some(format!("Address: {}", self.addr.ip().to_canonical())),
-            Some(format!("Encoder: {}", self.encoder)),
+            Some(t!("host.detail.address", address = self.addr.ip().to_canonical()).into_owned()),
+            Some(t!("host.detail.encoder", encoder = self.encoder).into_owned()),
             Some(if self.target_mbps < self.max_mbps - 0.05 {
-                format!("Bitrate: {:.1} of {:.0} Mbit/s (lowered: the network is behind)", self.target_mbps, self.max_mbps)
+                let (now, max) = (format!("{:.1}", self.target_mbps), format!("{:.0}", self.max_mbps));
+                t!("host.detail.bitrate_lowered", now = now, max = max).into_owned()
             } else {
-                format!("Bitrate: up to {:.0} Mbit/s", self.max_mbps)
+                t!("host.detail.bitrate", max = format!("{:.0}", self.max_mbps)).into_owned()
             }),
         ];
         if self.loss_pct >= 0.1 {
-            lines.push(Some(format!("Packets lost: {:.1}%", self.loss_pct)));
+            lines.push(Some(t!("host.detail.loss", percent = format!("{:.1}", self.loss_pct)).into_owned()));
         }
         if let Some(network) = &self.network {
-            lines.push(Some(format!("Screen's network: {}", network.summary)));
-            lines.extend(network.advice.iter().map(|tip| Some(format!("    Tip: {tip}"))));
+            lines.push(Some(t!("host.detail.network", summary = network.summary).into_owned()));
+            lines.extend(network.advice.iter().map(|tip| Some(format!("    {}", t!("host.menu.tip", tip = tip)))));
         }
         lines.push(None);
         match (self.latency_ms(), self.client) {
             (Some(total), Some(client)) => lines.extend(
                 [
-                    format!("Latency: about {total:.0} ms"),
-                    format!("    {this} (capture to sent): {:.1} ms", self.host_ms),
-                    format!("    Network (half the {:.1} ms round trip): {:.1} ms", self.rtt_ms, self.rtt_ms / 2.0),
-                    format!("    Screen (received to shown): {:.1} ms", client.display_ms),
-                    format!("Screen is showing {:.0} fps", client.shown_fps),
+                    t!("host.detail.latency", ms = format!("{total:.0}")),
+                    t!("host.detail.latency_host", ms = format!("{:.1}", self.host_ms)),
+                    t!("host.detail.latency_network", ms = format!("{:.1}", self.rtt_ms / 2.0)),
+                    t!("host.detail.latency_screen", ms = format!("{:.1}", client.display_ms)),
+                    t!("host.detail.showing", fps = format!("{:.0}", client.shown_fps)),
                     match client.late_frames {
-                        0 => "No frames delayed in transit".to_string(),
-                        n => format!("{n} frames delayed in transit (worst {:.0} ms)", client.worst_late_ms),
+                        0 => t!("host.detail.no_delays"),
+                        n => t!("host.detail.delays", count = n, ms = format!("{:.0}", client.worst_late_ms)),
                     },
-                    "Plus up to one refresh while the screen waits to display.".to_string(),
                 ]
-                .map(Some),
+                .map(|line| Some(line.into_owned())),
             ),
-            _ => lines.push(Some("Latency: waiting for the screen's first report".to_string())),
+            _ => lines.push(Some(t!("host.detail.waiting").into_owned())),
         }
         lines
     }

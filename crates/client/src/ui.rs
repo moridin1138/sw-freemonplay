@@ -2,9 +2,11 @@
 //! connecting view. They only describe what to show and report what the user asked for;
 //! app.rs acts on it.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use egui::{Align, Color32, CornerRadius, Key, Layout, RichText, Stroke, Vec2, vec2};
+use rust_i18n::t;
 
 use crate::net::Target;
 use crate::{CodecArg, Scale};
@@ -41,19 +43,19 @@ pub enum Role {
 }
 
 impl Role {
-    fn label(self) -> &'static str {
+    fn label(self) -> Cow<'static, str> {
         match self {
-            Role::Screen => "Extra screen",
-            Role::KeyboardMouse => "Keyboard and mouse only",
-            Role::Unused => "Not used",
+            Role::Screen => t!("screen.role.screen"),
+            Role::KeyboardMouse => t!("screen.role.keyboard_mouse"),
+            Role::Unused => t!("screen.role.unused"),
         }
     }
 
-    fn explanation(self) -> &'static str {
+    fn explanation(self) -> Cow<'static, str> {
         match self {
-            Role::Screen => "Shows another screen for the computer you connect to.",
-            Role::KeyboardMouse => "Stays this computer's own; the other computer's keyboard and mouse can move onto it.",
-            Role::Unused => "Left alone.",
+            Role::Screen => t!("screen.role.screen_help"),
+            Role::KeyboardMouse => t!("screen.role.keyboard_mouse_help"),
+            Role::Unused => t!("screen.role.unused_help"),
         }
     }
 }
@@ -90,6 +92,23 @@ pub struct Options {
     pub swap_command_control: bool,
     /// Share clipboard text with the host both ways.
     pub share_clipboard: bool,
+    /// Show the toolbar when the pointer reaches the top edge of a screen.
+    pub toolbar: bool,
+}
+
+impl Options {
+    /// The options that are remembered between launches.
+    pub fn settings(&self) -> crate::store::Settings {
+        crate::store::Settings {
+            fullscreen: self.fullscreen,
+            scale: self.scale,
+            codec: self.codec,
+            vsync: self.vsync,
+            keep_awake: self.keep_awake,
+            share_clipboard: self.share_clipboard,
+            toolbar: self.toolbar,
+        }
+    }
 }
 
 impl Options {
@@ -113,8 +132,39 @@ pub enum Action {
     ShowLog,
 }
 
+/// Chinese fonts that come with each OS. egui's own fonts have no Chinese characters.
+const CJK_FONTS: [&str; 7] = [
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    r"C:\Windows\Fonts\msyh.ttc",
+    r"C:\Windows\Fonts\simhei.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+];
+
+/// For Chinese, adds the system's Chinese font after egui's own (which still draw Latin
+/// text and symbols).
+fn add_language_fonts(ctx: &egui::Context) {
+    if !rust_i18n::locale().starts_with("zh") {
+        return;
+    }
+    let Some((path, bytes)) = CJK_FONTS.iter().find_map(|p| std::fs::read(p).ok().map(|b| (p, b))) else {
+        tracing::warn!("no Chinese font found; Chinese text may not show");
+        return;
+    };
+    tracing::info!("Chinese text uses {path}");
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert("cjk".into(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        fonts.families.entry(family).or_default().push("cjk".into());
+    }
+    ctx.set_fonts(fonts);
+}
+
 /// Graphite and amber, matching the app icon, in dark mode.
 pub fn style(ctx: &egui::Context) {
+    add_language_fonts(ctx);
     ctx.set_theme(egui::ThemePreference::Dark);
     ctx.style_mut_of(egui::Theme::Dark, |s| {
         s.visuals.panel_fill = GRAPHITE;
@@ -186,11 +236,11 @@ pub fn toolbar(ctx: &egui::Context, bar: &Toolbar) -> (Option<ToolbarAction>, eg
                         ui.label(RichText::new(bar.detail).small().color(MUTED));
                     });
                     ui.add_space(16.0);
-                    let label = if bar.fullscreen { "Exit Full Screen" } else { "Full Screen" };
+                    let label = if bar.fullscreen { t!("screen.toolbar.exit_fullscreen") } else { t!("screen.toolbar.fullscreen") };
                     if ui.add(egui::Button::new(label).min_size(vec2(96.0, 32.0))).clicked() {
                         action = Some(ToolbarAction::ToggleFullscreen);
                     }
-                    if primary(ui, "Disconnect", true) {
+                    if primary(ui, &t!("screen.disconnect"), true) {
                         action = Some(ToolbarAction::Disconnect);
                     }
                 });
@@ -214,11 +264,11 @@ pub fn reconnecting(ctx: &egui::Context, host: &str, seconds_left: u64) -> bool 
                 ui.horizontal(|ui| {
                     ui.spinner();
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(format!("Lost the connection to {host}")).strong());
-                        ui.label(RichText::new(format!("Reconnecting… ({seconds_left} s)")).color(MUTED));
+                        ui.label(RichText::new(t!("screen.reconnect.lost", host = host)).strong());
+                        ui.label(RichText::new(t!("screen.reconnect.trying", seconds = seconds_left)).color(MUTED));
                     });
                     ui.add_space(16.0);
-                    stop = ui.add(egui::Button::new("Stop").min_size(vec2(80.0, 32.0))).clicked();
+                    stop = ui.add(egui::Button::new(t!("screen.reconnect.stop")).min_size(vec2(80.0, 32.0))).clicked();
                 });
             });
     });
@@ -226,13 +276,14 @@ pub fn reconnecting(ctx: &egui::Context, host: &str, seconds_left: u64) -> bool 
 }
 
 /// The first few seconds of a stream: how to get the toolbar back.
-pub fn stream_hint(ctx: &egui::Context) {
+pub fn stream_hint(ctx: &egui::Context, toolbar: bool) {
     egui::Area::new(egui::Id::new("hint")).anchor(egui::Align2::CENTER_TOP, [0.0, 24.0]).show(ctx, |ui| {
         egui::Frame::popup(ui.style()).show(ui, |ui| {
-            ui.label(format!(
-                "Move the pointer to the top edge for Disconnect and Full Screen · {} disconnects",
-                shortcut('D')
-            ));
+            ui.label(if toolbar {
+                t!("screen.hint.toolbar", keys = shortcut('D'))
+            } else {
+                t!("screen.hint.keys", disconnect = shortcut('D'), fullscreen = shortcut('F'))
+            });
         });
     });
 }
@@ -282,7 +333,7 @@ fn header(ui: &mut egui::Ui, logo: Option<&egui::TextureHandle>) {
         ui.vertical(|ui| {
             ui.add_space(6.0);
             ui.label(RichText::new("Freemonplay Screen").size(24.0).strong().color(Color32::WHITE));
-            ui.label(RichText::new("Use this screen as an extra display for a computer on your network.").color(MUTED));
+            ui.label(RichText::new(t!("screen.tagline")).color(MUTED));
         });
     });
 }
@@ -348,22 +399,15 @@ fn hosts(
     options: &mut Options,
 ) -> Option<Action> {
     let mut action = None;
-    section(ui, "Connect to a computer");
+    section(ui, &t!("screen.hosts.title"));
     card(ui, |ui| {
         if hosts.is_empty() {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label("Looking for computers running Freemonplay…");
+                ui.label(t!("screen.hosts.searching"));
             });
-            ui.label(
-                RichText::new(
-                    "Open Freemonplay on the computer you want more screens for. If it doesn't show up, a firewall may \
-                     be blocking discovery: use Connect by address below.",
-                )
-                .color(MUTED)
-                .small(),
-            );
+            ui.label(RichText::new(t!("screen.hosts.searching_help")).color(MUTED).small());
             ui.add_space(4.0);
         }
         for (i, host) in hosts.iter().enumerate() {
@@ -375,7 +419,7 @@ fn hosts(
                 screen_glyph(ui, if host.paired { AMBER } else { MUTED });
                 ui.vertical(|ui| {
                     ui.label(RichText::new(&host.name).size(15.0).strong().color(Color32::WHITE));
-                    let status = if host.paired { "Paired" } else { "Not paired yet: you'll enter its code once" };
+                    let status = if host.paired { t!("screen.hosts.paired") } else { t!("screen.hosts.not_paired") };
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&host.address).color(MUTED).small());
                         ui.label(RichText::new("·").color(MUTED).small());
@@ -383,7 +427,7 @@ fn hosts(
                     });
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if primary(ui, "Connect", true) {
+                    if primary(ui, &t!("screen.connect"), true) {
                         action = Some(Action::Connect(i));
                     }
                 });
@@ -394,35 +438,33 @@ fn hosts(
     monitor_roles(ui, monitors, kvm_supported, options);
 
     ui.add_space(6.0);
-    egui::CollapsingHeader::new("Connect by address").show(ui, |ui| {
+    egui::CollapsingHeader::new(t!("screen.hosts.by_address")).id_salt("by_address").show(ui, |ui| {
         ui.horizontal(|ui| {
             let field = ui.add(
                 egui::TextEdit::singleline(address)
-                    .hint_text("192.168.1.20 or a computer name")
+                    .hint_text(t!("screen.hosts.address_hint"))
                     .desired_width(240.0)
                     .margin(vec2(8.0, 6.0)),
             );
             let enter = field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
             let ready = !address.trim().is_empty();
-            if (primary(ui, "Connect", ready) || enter) && ready {
+            if (primary(ui, &t!("screen.connect"), ready) || enter) && ready {
                 action = Some(Action::ConnectAddress(address.trim().to_string()));
             }
         });
     });
-    egui::CollapsingHeader::new("Options").show(ui, |ui| options_panel(ui, options));
+    egui::CollapsingHeader::new(t!("screen.options.title")).id_salt("options").show(ui, |ui| options_panel(ui, options));
 
     ui.add_space(10.0);
-    ui.label(
-        RichText::new(format!(
-            "While connected, move the pointer to the top edge for Disconnect and Full Screen, or press {} to disconnect.",
-            shortcut('D'),
-        ))
-        .color(MUTED)
-        .small(),
-    );
+    let help = if options.toolbar {
+        t!("screen.hosts.disconnect_help_toolbar", keys = shortcut('D'))
+    } else {
+        t!("screen.hosts.disconnect_help", keys = shortcut('D'))
+    };
+    ui.label(RichText::new(help).color(MUTED).small());
     ui.horizontal(|ui| {
         ui.label(RichText::new(format!("Freemonplay Screen {}", env!("CARGO_PKG_VERSION"))).color(MUTED.linear_multiply(0.7)).small());
-        if ui.link(RichText::new("Show log").small()).clicked() {
+        if ui.link(RichText::new(t!("screen.show_log")).small()).clicked() {
             action = Some(Action::ShowLog);
         }
     });
@@ -437,7 +479,7 @@ fn monitor_roles(ui: &mut egui::Ui, monitors: &[MonitorRow], kvm_supported: bool
     ui.add_space(6.0);
     if monitors.is_empty() {
         // One monitor: a simple either/or.
-        section(ui, "Use this screen as");
+        section(ui, &t!("screen.role.title"));
         card(ui, |ui| {
             ui.horizontal(|ui| {
                 for role in [Role::Screen, Role::KeyboardMouse] {
@@ -447,10 +489,10 @@ fn monitor_roles(ui: &mut egui::Ui, monitors: &[MonitorRow], kvm_supported: bool
             ui.label(RichText::new(options.main_role.explanation()).color(MUTED).small());
         });
     } else {
-        section(ui, "Your monitors");
+        section(ui, &t!("screen.role.monitors"));
         card(ui, |ui| {
             egui::Grid::new("monitors").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
-                ui.label("This one (with this window)");
+                ui.label(t!("screen.role.this_one"));
                 let choices: &[Role] = if kvm_supported { &[Role::Screen, Role::KeyboardMouse] } else { &[Role::Screen] };
                 role_picker(ui, "main", &mut options.main_role, choices);
                 ui.end_row();
@@ -473,55 +515,47 @@ fn monitor_roles(ui: &mut egui::Ui, monitors: &[MonitorRow], kvm_supported: bool
                     ui.end_row();
                 }
             });
-            ui.label(
-                RichText::new("Extra screen: shows another screen for the other computer. Keyboard and mouse only: stays this computer's, and the other computer's keyboard and mouse can move onto it.")
-                    .color(MUTED)
-                    .small(),
-            );
         });
     }
     // A Mac controlling a Mac needs no swapping.
     if options.any_keyboard_mouse() && !cfg!(target_os = "macos") {
-        ui.checkbox(&mut options.swap_command_control, "Mac shortcuts: Command acts as Ctrl")
-            .on_hover_text("So Command+C copies here too. Ctrl then acts as the Windows key.");
+        ui.checkbox(&mut options.swap_command_control, t!("screen.role.mac_shortcuts"))
+            .on_hover_text(t!("screen.role.mac_shortcuts_help"));
     }
 }
 
 fn options_panel(ui: &mut egui::Ui, options: &mut Options) {
-    ui.checkbox(&mut options.fullscreen, "Full screen (on the monitor this window is on)");
+    ui.checkbox(&mut options.fullscreen, t!("screen.options.fullscreen"));
     egui::Grid::new("options").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-        ui.label("Sharpness");
-        egui::ComboBox::from_id_salt("sharpness")
-            .selected_text(match options.scale {
-                Scale::Auto => "Automatic",
-                Scale::One => "Standard (1x)",
-                Scale::Two => "Retina (2x)",
-            })
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut options.scale, Scale::Auto, "Automatic");
-                ui.selectable_value(&mut options.scale, Scale::One, "Standard (1x)");
-                ui.selectable_value(&mut options.scale, Scale::Two, "Retina (2x)");
-            });
+        let scale_label = |scale: Scale| match scale {
+            Scale::Auto => t!("screen.options.automatic"),
+            Scale::One => t!("screen.options.standard"),
+            Scale::Two => t!("screen.options.retina"),
+        };
+        ui.label(t!("screen.options.sharpness"));
+        egui::ComboBox::from_id_salt("sharpness").selected_text(scale_label(options.scale)).show_ui(ui, |ui| {
+            for scale in [Scale::Auto, Scale::One, Scale::Two] {
+                ui.selectable_value(&mut options.scale, scale, scale_label(scale));
+            }
+        });
         ui.end_row();
-        ui.label("Video codec");
-        egui::ComboBox::from_id_salt("codec")
-            .selected_text(match options.codec {
-                CodecArg::Auto => "Automatic",
-                CodecArg::H264 => "H.264",
-                CodecArg::H265 => "HEVC",
-            })
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut options.codec, CodecArg::Auto, "Automatic");
-                ui.selectable_value(&mut options.codec, CodecArg::H264, "H.264");
-                ui.selectable_value(&mut options.codec, CodecArg::H265, "HEVC");
-            });
+        let codec_label = |codec: CodecArg| match codec {
+            CodecArg::Auto => t!("screen.options.automatic"),
+            CodecArg::H264 => "H.264".into(),
+            CodecArg::H265 => "HEVC".into(),
+        };
+        ui.label(t!("screen.options.codec"));
+        egui::ComboBox::from_id_salt("codec").selected_text(codec_label(options.codec)).show_ui(ui, |ui| {
+            for codec in [CodecArg::Auto, CodecArg::H264, CodecArg::H265] {
+                ui.selectable_value(&mut options.codec, codec, codec_label(codec));
+            }
+        });
         ui.end_row();
     });
-    ui.checkbox(&mut options.keep_awake, "Keep this screen awake while connected");
-    ui.checkbox(&mut options.share_clipboard, "Share the clipboard with the other computer")
-        .on_hover_text("Text and images copied on either computer can be pasted on the other. Passwords copied from password managers stay put.");
-    ui.checkbox(&mut options.vsync, "Wait for the display refresh (no tearing)")
-        .on_hover_text("Turning this off saves up to one refresh of latency, but the picture can tear.");
+    ui.checkbox(&mut options.keep_awake, t!("screen.options.keep_awake"));
+    ui.checkbox(&mut options.share_clipboard, t!("screen.options.clipboard")).on_hover_text(t!("screen.options.clipboard_help"));
+    ui.checkbox(&mut options.toolbar, t!("screen.options.toolbar")).on_hover_text(t!("screen.options.toolbar_help"));
+    ui.checkbox(&mut options.vsync, t!("screen.options.vsync")).on_hover_text(t!("screen.options.vsync_help"));
 }
 
 fn role_picker(ui: &mut egui::Ui, id: &str, role: &mut Role, choices: &[Role]) {
@@ -535,17 +569,13 @@ fn role_picker(ui: &mut egui::Ui, id: &str, role: &mut Role, choices: &[Role]) {
 /// Keyboard and mouse only: nothing to show but how to use it.
 fn remote(ui: &mut egui::Ui, host: &str) -> Option<Action> {
     let mut action = None;
-    section(ui, &format!("Connected to {host}"));
+    section(ui, &t!("screen.remote.title", host = host));
     card(ui, |ui| {
-        ui.label(
-            "Its keyboard and mouse can now move onto this computer's monitors: push its pointer off the side of \
-             its main display that faces this one (chosen in Freemonplay's menu there). Moving back returns them.",
-        );
-        ui.label(RichText::new(format!("{} on that computer brings them back from anywhere.", shortcut('K'))).color(MUTED));
-        ui.label(RichText::new("Text and images you copy on one computer can be pasted on the other.").color(MUTED));
+        ui.label(t!("screen.remote.how", host = host));
+        ui.label(RichText::new(t!("screen.remote.back", keys = shortcut('K'), host = host)).color(MUTED));
     });
     ui.add_space(8.0);
-    if primary(ui, "Disconnect", true) {
+    if primary(ui, &t!("screen.disconnect"), true) {
         action = Some(Action::Disconnect);
     }
     action
@@ -553,10 +583,10 @@ fn remote(ui: &mut egui::Ui, host: &str) -> Option<Action> {
 
 fn code_dialog(ui: &mut egui::Ui, host: &str, code: &mut String, error: Option<&str>) -> Option<Action> {
     let mut action = None;
-    section(ui, &format!("Pair with {host}"));
+    section(ui, &t!("screen.code.title", host = host));
     card(ui, |ui| {
-        ui.label("Enter the 6 digit pairing code shown in Freemonplay's menu on that computer.");
-        ui.label(RichText::new("You only need to do this once.").color(MUTED).small());
+        ui.label(t!("screen.code.help"));
+        ui.label(RichText::new(t!("screen.code.once")).color(MUTED).small());
         ui.add_space(6.0);
         let field = ui.add(
             egui::TextEdit::singleline(code)
@@ -579,10 +609,10 @@ fn code_dialog(ui: &mut egui::Ui, host: &str, code: &mut String, error: Option<&
         let enter = field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            if primary(ui, "Pair", digits == 6) || (enter && digits == 6) {
+            if primary(ui, &t!("screen.code.pair"), digits == 6) || (enter && digits == 6) {
                 action = Some(Action::SubmitCode);
             }
-            if ui.button("Cancel").clicked() {
+            if ui.button(t!("screen.cancel")).clicked() {
                 action = Some(Action::CancelCode);
             }
         });
@@ -596,10 +626,10 @@ fn connecting(ui: &mut egui::Ui, to: &str) -> Option<Action> {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.spinner();
-            ui.label(RichText::new(format!("Connecting to {to}…")).size(15.0));
+            ui.label(RichText::new(t!("screen.connecting", host = to)).size(15.0));
         });
         ui.add_space(4.0);
-        if ui.button("Cancel").clicked() {
+        if ui.button(t!("screen.cancel")).clicked() {
             action = Some(Action::CancelConnect);
         }
     });

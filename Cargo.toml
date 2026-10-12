@@ -9,6 +9,8 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/moridin1138/sw-freemonplay"
 
 [workspace.dependencies]
+rust-i18n = "4"
+sys-locale = "0.3"
 fmp-proto = { path = "crates/proto" }
 anyhow = "1"
 clap = { version = "4.6", features = ["derive"] }

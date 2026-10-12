@@ -11,6 +11,8 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSArray, NSEdgeInsets, NSPoint, NSRect, NSSize, NSString};
 
+use rust_i18n::t;
+
 use crate::platform;
 
 const WIDTH: f64 = 540.0;
@@ -26,6 +28,9 @@ pub struct Welcome {
     restart_button: Retained<NSButton>,
     input_status: Retained<NSTextField>,
     input_button: Retained<NSButton>,
+    /// The steps' button rows, hidden when none of their buttons apply.
+    screen_row: Retained<NSStackView>,
+    input_row: Retained<NSStackView>,
     code: Retained<NSTextField>,
     /// Whether Screen Recording was already allowed when this app started (a new grant
     /// needs a restart to take effect).
@@ -45,8 +50,8 @@ impl Welcome {
             let view = NSImageView::imageViewWithImage(&image, mtm);
             view.into_super()
         });
-        let title = label(mtm, "Set up Freemonplay", 22.0, true);
-        let subtitle = wrapping(mtm, "This Mac gets extra screens: other computers, tablets or PCs on your network show them over Wi-Fi or Ethernet.", 13.0);
+        let title = label(mtm, &t!("host.welcome.title"), 22.0, true);
+        let subtitle = wrapping(mtm, &t!("host.welcome.subtitle_mac"), 13.0);
         subtitle.setTextColor(Some(&NSColor::secondaryLabelColor()));
         subtitle.setPreferredMaxLayoutWidth(TEXT_WIDTH - 80.0);
         let titles = vstack(mtm, &[title.into_super().into_super(), subtitle.clone().into_super().into_super()], 4.0);
@@ -59,23 +64,23 @@ impl Welcome {
 
         // Step 1: Screen Recording.
         let screen_status = label(mtm, "", 13.0, true);
-        let screen_button = button("Allow…", sel!(allowScreenRecording:));
-        let restart_button = button("Restart Freemonplay", sel!(restartApp:));
-        let step1 = step(
+        let screen_button = button(&t!("host.welcome.allow"), sel!(allowScreenRecording:));
+        let restart_button = button(&t!("host.welcome.restart"), sel!(restartApp:));
+        let (step1, screen_row) = step(
             mtm,
-            "1. Screen Recording",
-            "Lets Freemonplay show your extra screens on the other devices. macOS applies it the next time Freemonplay starts.",
+            &t!("host.welcome.screen_title"),
+            &t!("host.welcome.screen_help"),
             &screen_status,
             &[screen_button.clone().into_super().into_super(), restart_button.clone().into_super().into_super()],
         );
 
         // Step 2: Accessibility.
         let input_status = label(mtm, "", 13.0, true);
-        let input_button = button("Allow…", sel!(allowAccessibility:));
-        let step2 = step(
+        let input_button = button(&t!("host.welcome.allow"), sel!(allowAccessibility:));
+        let (step2, input_row) = step(
             mtm,
-            "2. Accessibility (optional)",
-            "Lets the screens use their own mouse, keyboard and touch on this Mac, and lets this Mac's keyboard and mouse move onto other computers.",
+            &t!("host.welcome.input_title"),
+            &t!("host.welcome.input_help"),
             &input_status,
             &[input_button.clone().into_super().into_super()],
         );
@@ -84,21 +89,21 @@ impl Welcome {
         let code = label(mtm, &format_code(pairing_code), 26.0, true);
         code.setFont(Some(&NSFont::monospacedDigitSystemFontOfSize_weight(26.0, 0.4)));
         code.setSelectable(true);
-        let step3 = step(
+        let (step3, _) = step(
             mtm,
-            "3. Connect a screen",
-            "On the other device, install Freemonplay Screen, open it and pick this Mac. The first time, it asks for this pairing code:",
+            &t!("host.welcome.connect_title"),
+            &t!("host.welcome.connect_help"),
             &label(mtm, "", 13.0, false),
             &[
                 code.clone().into_super().into_super(),
-                button("Copy Code", sel!(copyCodeButton:)).into_super().into_super(),
-                button("Get Freemonplay Screen…", sel!(openDownload:)).into_super().into_super(),
+                button(&t!("host.welcome.copy"), sel!(copyCodeButton:)).into_super().into_super(),
+                button(&t!("host.welcome.get_screen"), sel!(openDownload:)).into_super().into_super(),
             ],
         );
 
-        let done = button("Done", sel!(closeWelcome:));
+        let done = button(&t!("host.welcome.done"), sel!(closeWelcome:));
         done.setKeyEquivalent(&NSString::from_str("\r"));
-        let footer_note = wrapping(mtm, "You'll find Freemonplay in the menu bar. Setup Guide… there reopens this window.", 12.0);
+        let footer_note = wrapping(mtm, &t!("host.welcome.footer"), 12.0);
         footer_note.setTextColor(Some(&NSColor::secondaryLabelColor()));
         footer_note.setPreferredMaxLayoutWidth(TEXT_WIDTH - 90.0);
         let footer = hstack(mtm, &[footer_note.into_super().into_super(), done.into_super().into_super()], 12.0);
@@ -122,14 +127,13 @@ impl Welcome {
             window.setReleasedWhenClosed(false);
             window
         };
-        window.setTitle(&NSString::from_str("Welcome to Freemonplay"));
+        window.setTitle(&NSString::from_str(&t!("host.welcome.window")));
         window.setContentView(Some(&content));
-        let fitting = content.fittingSize();
-        window.setContentSize(NSSize::new(WIDTH, fitting.height.max(400.0)));
+        window.setContentSize(NSSize::new(WIDTH, content.fittingSize().height));
         window.center();
 
         let welcome =
-            Self { window, screen_status, screen_button, restart_button, input_status, input_button, code, screen_at_launch };
+            Self { window, screen_status, screen_button, restart_button, input_status, input_button, screen_row, input_row, code, screen_at_launch };
         welcome.refresh(pairing_code);
         welcome
     }
@@ -138,24 +142,36 @@ impl Welcome {
     pub fn refresh(&self, pairing_code: &str) {
         let screen = platform::screen_recording_allowed();
         let (text, color) = match (screen, self.screen_at_launch) {
-            (true, true) => ("✓ Allowed", NSColor::systemGreenColor()),
-            (true, false) => ("✓ Allowed: restart Freemonplay to use it", NSColor::systemOrangeColor()),
-            (false, _) => ("Not allowed yet", NSColor::systemOrangeColor()),
+            (true, true) => (t!("host.welcome.allowed"), NSColor::systemGreenColor()),
+            (true, false) => (t!("host.welcome.allowed_restart"), NSColor::systemOrangeColor()),
+            (false, _) => (t!("host.welcome.not_allowed"), NSColor::systemOrangeColor()),
         };
-        self.screen_status.setStringValue(&NSString::from_str(text));
+        self.screen_status.setStringValue(&NSString::from_str(&text));
         self.screen_status.setTextColor(Some(&color));
         // Only the buttons that still do something.
         self.screen_button.setHidden(screen);
         self.restart_button.setHidden(!screen || self.screen_at_launch);
+        self.screen_row.setHidden(screen && self.screen_at_launch);
 
         let input = platform::input_allowed();
-        let (text, color) =
-            if input { ("✓ Allowed", NSColor::systemGreenColor()) } else { ("Not allowed yet", NSColor::systemOrangeColor()) };
-        self.input_status.setStringValue(&NSString::from_str(text));
+        let (text, color) = if input {
+            (t!("host.welcome.allowed"), NSColor::systemGreenColor())
+        } else {
+            (t!("host.welcome.not_allowed"), NSColor::systemOrangeColor())
+        };
+        self.input_status.setStringValue(&NSString::from_str(&text));
         self.input_status.setTextColor(Some(&color));
         self.input_button.setHidden(input);
+        self.input_row.setHidden(input);
 
         self.code.setStringValue(&NSString::from_str(&format_code(pairing_code)));
+        // Fit the window to what's showing (rows come and go as permissions change).
+        if let Some(content) = self.window.contentView() {
+            let height = content.fittingSize().height;
+            if (self.window.contentLayoutRect().size.height - height).abs() > 1.0 {
+                self.window.setContentSize(NSSize::new(WIDTH, height));
+            }
+        }
     }
 
     pub fn show(&self, mtm: MainThreadMarker) {
@@ -166,7 +182,7 @@ impl Welcome {
 }
 
 /// "123456" as "123 456", easier to read and type.
-fn format_code(code: &str) -> String {
+pub fn format_code(code: &str) -> String {
     if code.len() == 6 { format!("{} {}", &code[..3], &code[3..]) } else { code.to_string() }
 }
 
@@ -177,13 +193,14 @@ fn step(
     detail: &str,
     status: &NSTextField,
     buttons: &[Retained<NSView>],
-) -> Retained<NSStackView> {
+) -> (Retained<NSStackView>, Retained<NSStackView>) {
     let title = label(mtm, title, 15.0, true);
     let heading = hstack(mtm, &[title.into_super().into_super(), retained_view(status)], 10.0);
     let detail = wrapping(mtm, detail, 13.0);
     detail.setTextColor(Some(&NSColor::secondaryLabelColor()));
     let row = hstack(mtm, buttons, 10.0);
-    vstack(mtm, &[heading.into_super(), detail.into_super().into_super(), row.into_super()], 6.0)
+    let step = vstack(mtm, &[heading.into_super(), detail.into_super().into_super(), row.clone().into_super()], 6.0);
+    (step, row)
 }
 
 fn retained_view(field: &NSTextField) -> Retained<NSView> {

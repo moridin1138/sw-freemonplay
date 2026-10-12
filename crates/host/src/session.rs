@@ -411,17 +411,9 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     let watchdog = async {
         tokio::time::sleep(Duration::from_secs(3)).await;
         if !slot.has_frame() {
-            let message = if cfg!(target_os = "macos") {
-                "no frames are being captured. Check that Freemonplay (or the terminal running \
-                 it) has Screen Recording permission in System Settings > Privacy & Security > \
-                 Screen & System Audio Recording, then restart it. If it's already on, remove \
-                 the entry and allow it again: it may belong to an older build."
-            } else {
-                "no frames are being captured from this screen's monitor yet. Try disconnecting \
-                 and connecting again."
-            }
-            .to_string();
-            tracing::warn!("{who}: {message}");
+            let key = if cfg!(target_os = "macos") { "host.notice.no_frames_mac" } else { "host.notice.no_frames" };
+            let message = rust_i18n::t!(key).into_owned();
+            tracing::warn!("{who}: no frames captured after 3 s");
             let _ = host_tx.send(HostMsg::Notice { message });
         }
         std::future::pending::<()>().await;

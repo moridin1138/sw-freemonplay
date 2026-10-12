@@ -73,6 +73,15 @@ crates/
     store.rs          client id, paired hosts (token, pinned certificate fingerprint)
 ```
 
+## Text and languages
+
+Everything people see in either app comes from `locales/<language>.yml` (rust-i18n,
+compiled in): `screen.*` keys for the screen app, `host.*` for the host. At startup each app
+picks the best file for the OS locale (`fmp_proto::language::pick`; `FMP_LANG` overrides
+it), falling back to English key by key. Adding a file adds a language without code
+changes. For Chinese the screen app loads a system Chinese font into egui, whose own fonts
+have none. A test checks every file against `en.yml`. Logs stay in English.
+
 ## Protocol
 
 QUIC (`quinn`, TLS via `rustls` with a self-signed host certificate). Messages are

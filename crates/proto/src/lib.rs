@@ -13,6 +13,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub mod hid;
+pub mod language;
 pub mod pairing;
 
 pub const PROTOCOL_VERSION: u32 = 11;

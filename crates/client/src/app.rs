@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use fmp_proto::{
     ClientMsg, ClientStats, Codec, DisplayRequest, InputEvent, KvmLayout, NetworkInfo, Rect, ScreenId, TouchPhase,
 };
+use rust_i18n::t;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use winit::application::ApplicationHandler;
@@ -521,7 +522,7 @@ impl App {
                         let _ = live.out.send(ClientMsg::Network(network));
                     }
                 }
-                main.window.set_title(&format!("Freemonplay: {host_name} (keyboard and mouse)"));
+                main.window.set_title(&t!("screen.title.keyboard_mouse", host = host_name));
             }
             self.screen = Screen::Remote { host: host_name };
             self.redraw();
@@ -666,15 +667,15 @@ impl App {
                     target,
                     fingerprint,
                     code: String::new(),
-                    error: Some(reason.trim_start_matches("host refused: ").to_string()),
+                    error: Some(reason),
                 };
             }
             _ => {
                 self.screen = Screen::Hosts;
                 self.message = Some(if live.disconnecting {
-                    format!("Disconnected from {}.", self.host_name)
+                    t!("screen.message.disconnected_from", host = self.host_name).into_owned()
                 } else {
-                    format!("Disconnected: {reason}")
+                    t!("screen.message.disconnected", reason = reason).into_owned()
                 });
             }
         }
@@ -829,6 +830,7 @@ impl App {
         };
         let ctx = self.egui_ctx.clone();
         let mut action = None;
+        let before = self.options.settings();
         let output = ctx.run_ui(raw, |ui| {
             action = ui::draw(
                 ui,
@@ -845,6 +847,13 @@ impl App {
             );
         });
         self.present_ui(&window, output);
+        // Only what the person changed here, so command line flags aren't saved.
+        let settings = self.options.settings();
+        if settings != before
+            && let Err(e) = self.store.lock().unwrap().set_settings(settings)
+        {
+            tracing::warn!("couldn't save the options: {e:#}");
+        }
         if let Some(action) = action {
             self.handle(action);
         }
@@ -888,7 +897,7 @@ impl App {
                     action = clicked;
                     rect = Some(area);
                 } else {
-                    ui::stream_hint(ui.ctx());
+                    ui::stream_hint(ui.ctx(), self.options.toolbar);
                 }
             });
             if toolbar {
@@ -899,7 +908,7 @@ impl App {
             display.renderer.render(None);
         }
         if stop {
-            let message = format!("Disconnected from {}.", self.host_name);
+            let message = t!("screen.message.disconnected_from", host = self.host_name).into_owned();
             return self.stop_reconnecting(message);
         }
         match action {
@@ -934,6 +943,9 @@ impl App {
     /// stays while the pointer is on it. Returns whether the event is the toolbar's (and so
     /// not the host's).
     fn toolbar_input(&mut self, event: &WindowEvent) -> bool {
+        if !self.options.toolbar {
+            return false;
+        }
         let Some(main) = self.displays.get(&MAIN) else { return false };
         let window = main.window.clone();
         match event {
@@ -1117,7 +1129,7 @@ impl ApplicationHandler<UserEvent> for App {
             }
             UserEvent::Closed { view, reason, lost } => self.on_closed(view, reason, lost),
             UserEvent::ReconnectFailed => {
-                let message = format!("Lost the connection to {} and couldn't reconnect.", self.host_name);
+                let message = t!("screen.message.lost", host = self.host_name).into_owned();
                 self.stop_reconnecting(message);
             }
         }

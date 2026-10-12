@@ -1,4 +1,4 @@
-//! The client's stable id and the hosts it has paired with.
+//! The client's stable id, the hosts it has paired with, and its options.
 //!
 //! Hosts are keyed by the SHA-256 of their TLS certificate. A host we know is one whose
 //! certificate we've seen before, so a different machine claiming the same name or address
@@ -14,6 +14,36 @@ use serde::{Deserialize, Serialize};
 struct Data {
     client_id: String,
     hosts: BTreeMap<String, KnownHost>,
+    #[serde(default)]
+    settings: Settings,
+}
+
+/// The options in the window, remembered between launches.
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[serde(default)]
+pub struct Settings {
+    pub fullscreen: bool,
+    pub scale: crate::Scale,
+    pub codec: crate::CodecArg,
+    pub vsync: bool,
+    pub keep_awake: bool,
+    pub share_clipboard: bool,
+    /// The toolbar at the top edge of a screen.
+    pub toolbar: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            fullscreen: true,
+            scale: crate::Scale::Auto,
+            codec: crate::CodecArg::Auto,
+            vsync: true,
+            keep_awake: true,
+            share_clipboard: true,
+            toolbar: true,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -67,6 +97,19 @@ impl ClientStore {
     /// Whether we've paired with the host advertising this id.
     pub fn is_paired(&self, host_id: &str) -> bool {
         self.data.hosts.values().any(|h| h.host_id.as_deref() == Some(host_id))
+    }
+
+    pub fn settings(&self) -> Settings {
+        self.data.settings.clone()
+    }
+
+    /// Saves changed options (does nothing if they haven't changed).
+    pub fn set_settings(&mut self, settings: Settings) -> Result<()> {
+        if settings == self.data.settings {
+            return Ok(());
+        }
+        self.data.settings = settings;
+        self.save()
     }
 
     pub fn forget(&mut self, fingerprint: &str) -> Result<()> {

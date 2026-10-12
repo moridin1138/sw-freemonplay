@@ -104,7 +104,7 @@ A window lists the computers running Freemonplay on your network. Drag it to the
 - **Not used.**
 
 Copied text and images are shared both ways between the Mac and its screens (except passwords copied from password managers); turn it off with **Share Clipboard with Screens** in the Mac's menu or **Share the clipboard with the host** in the client's options.
- Hosts on other networks can be reached with **Connect by address**, and **Options** sets full screen, sharpness (1x/2x), codec, vsync and whether to keep the screen awake while connected (on by default).
+ Hosts on other networks can be reached with **Connect by address**, and **Options** sets full screen, sharpness (1x/2x), codec, vsync, clipboard sharing, whether to keep the screen awake while connected (on by default) and whether the toolbar appears at the top edge while connected (on by default). The app remembers them.
 
 Useful options:
 
@@ -141,6 +141,10 @@ Freemonplay then lives in the notification area by the clock (under the ^ arrow 
 Each screen that connects extends the desktop onto its own virtual monitor, removed again when it disconnects. Each gets that screen's own display scale (a Retina Mac 200%, a PC at 150% 150%), so text appears the size it would there. Without the driver, screens mirror the primary monitor.
 
 Without the installer, build `freemonplay-host` and run, as administrator, `freemonplay-host --install-display-driver <folder> --allow-firewall`, where the folder is the unpacked `VirtualDisplayDriver-x86.Driver.Only.zip` (or put it in a `driver` folder beside `freemonplay-host.exe` and use the setup dialog). `--uninstall-display-driver --remove-firewall` undoes both. `freemonplay-host --no-tray` runs in a terminal instead of the notification area.
+
+## Languages
+
+Both apps follow the computer's language: English, German, Spanish, French, Turkish and Simplified Chinese so far. Translations are plain text files in [`locales`](locales), one per language, and new ones are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## How it works
 
