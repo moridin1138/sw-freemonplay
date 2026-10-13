@@ -12,6 +12,7 @@ pub mod display;
 pub mod driver;
 mod encoder;
 mod input;
+pub mod kvm;
 pub mod system;
 
 use anyhow::Result;
@@ -73,27 +74,6 @@ pub fn check_permissions() -> Result<()> {
     }
     display::hide_leftovers();
     Ok(())
-}
-
-pub mod kvm {
-    //! Keyboard and mouse mode with Windows as the host needs low-level input hooks; later.
-    use std::sync::Arc;
-
-    use anyhow::{Result, bail};
-
-    use crate::kvm::{Bounds, Kvm};
-
-    pub fn start(_kvm: Arc<Kvm>) -> Result<()> {
-        bail!("keyboard and mouse mode isn't available on Windows hosts yet")
-    }
-    pub fn display_bounds(_display: u32) -> Option<Bounds> {
-        None
-    }
-    pub fn main_display() -> u32 {
-        0
-    }
-    pub fn capture_cursor(_park: (f64, f64)) {}
-    pub fn release_cursor(_at: (f64, f64)) {}
 }
 
 pub mod network {

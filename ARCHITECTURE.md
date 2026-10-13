@@ -53,7 +53,7 @@ crates/
                       mode, the screen's own display scale, removed on disconnect),
                       driver.rs (installs the Virtual Display Driver with 3 monitors and a
                       resolution list), system.rs (firewall rule, Run key, elevation, one
-                      running copy)
+                      running copy), kvm.rs (low-level hooks for keyboard and mouse mode)
     platform/unsupported.rs   stubs (and the plan) for the Linux host
   client/   freemonplay-screen: discovery, sessions, decoding, rendering, input, GUI
     app.rs            the app state machine and its windows ("displays")
@@ -159,7 +159,8 @@ Latency beats completeness everywhere:
 
 ## Keyboard and mouse mode
 
-A software KVM: the Mac's keyboard and mouse control a client's own monitors. The client
+A software KVM: the host's keyboard and mouse (Mac or Windows) control a client's own
+monitors. The client
 sends a `KvmLayout` in its `Hello`: the rectangles (its desktop pixels) of the monitors set
 to "Keyboard and mouse", plus, in a mixed layout, the monitor showing the streamed
 screen. A client using only keyboard and mouse sets `input_only`; the host creates no
@@ -180,6 +181,18 @@ KVMs do), then swallows all input and forwards it as `Remote` events: relative m
 buttons, scroll, and keys as HID usages (mac keycodes mapped back through the injection
 table; modifier presses derived from device-dependent flag bits). Ctrl+Alt+Shift+K, a
 failed send or the session ending takes control back.
+
+**Windows host** (`platform/windows/kvm.rs`). Low-level mouse and keyboard hooks
+(`WH_MOUSE_LL`, `WH_KEYBOARD_LL`) on their own thread; injected events (screens
+controlling this PC) carry the injected flag and are ignored. Windows holds the cursor at an
+edge with nothing beyond and keeps reporting the same position, so a move that doesn't
+change the position at an edge counts as pushing against it. While a screen has control,
+the cursor stays parked just inside the edge and every move is measured from there (the
+hook sees the accelerated position before Windows moves the cursor, and swallowing the
+event keeps it parked); the cursor is hidden by swapping the system cursors for a blank
+one and restored by reloading the user's scheme. Keys are forwarded as HID usages (set 1
+scancodes mapped back), repeats dropped; a key pressed before the screen took over is let
+through when it's released, so it doesn't stick here. Displays are identified by HMONITOR.
 
 **Client** (`kvm.rs`). Keeps its own pointer position, moves it by the host's deltas
 (scaled by each monitor's pixels per point) and places the cursor absolutely, so the

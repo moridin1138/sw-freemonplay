@@ -160,7 +160,7 @@ One QUIC connection per screen: the host captures its virtual display, hardware 
 - **HEVC on Linux clients** is offered automatically only with a VAAPI HEVC decoder (`vah265dec`/`vaapih265dec`); `--codec h265` forces it in software via `avdec_h265`.
 - **Bitrate control with the software encoder is loose.** Frame skipping is off to avoid stutter, and OpenH264 can't cap bitrate strictly without it. That's fine on a LAN.
 - **Linux packaging** is a tarball with a desktop entry; there's no AppImage or Flatpak yet.
-- **The Windows host is a preview:** keyboard and mouse mode doesn't work with Windows as the host yet, and the virtual monitors come from a fixed set of three with a list of resolutions (screens with other sizes get the closest of the same shape).
+- **The Windows host is a preview:** keyboard and mouse mode with Windows as the host is new and not yet tested on a real setup, and the virtual monitors come from a fixed set of three with a list of resolutions (screens with other sizes get the closest of the same shape).
 - **Linux hosts** aren't implemented yet (see `crates/host/src/platform/unsupported.rs` for the plan).
 - **Touch** maps to a single-finger mouse. Multi-touch gestures aren't forwarded.
 

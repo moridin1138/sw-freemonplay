@@ -8,6 +8,12 @@ publishes it as the release notes.
 
 Hosts and screens must both be updated: the protocol changed (version 12).
 
+### Added
+- **Keyboard and mouse mode with Windows as the host:** a PC's keyboard and mouse can now
+  move onto screens' own monitors, as a Mac's can: push the pointer off the edge leading to
+  them, and Ctrl+Alt+Shift+K brings them back. Both layouts work (monitors around a
+  streamed screen, or beside the main display, chosen in the tray menu).
+
 ### Changed
 - **The rest of the text is translated:** the Wi-Fi details and tips in the host's menu
   (screens now send facts about their link, which each app words in its own language), the

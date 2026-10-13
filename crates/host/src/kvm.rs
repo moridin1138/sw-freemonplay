@@ -2,7 +2,7 @@
 //! client's own monitors, without streaming them.
 //!
 //! Sessions that offer such monitors register a [`Link`]. The platform layer watches the
-//! pointer (macOS: an event tap) and asks [`Kvm::check_entry`] whether it's pushing off an
+//! pointer (macOS: an event tap; Windows: low-level hooks) and asks [`Kvm::check_entry`] whether it's pushing off an
 //! edge that leads to one. If so it takes over: the local cursor is frozen and hidden,
 //! and all mouse and keyboard input goes to that client ([`Kvm::forward`]) until the
 //! client hands it back ([`Kvm::return_control`]) or the escape shortcut is pressed.
@@ -22,7 +22,8 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::clipboard::Hub;
 use crate::platform::kvm as platform;
 
-/// A display's area in this computer's global coordinates (macOS: points, y down).
+/// A display's area in this computer's global coordinates, y down (macOS: points;
+/// Windows: physical pixels).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Bounds {
     pub x: f64,

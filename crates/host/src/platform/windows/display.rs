@@ -76,8 +76,10 @@ impl VirtualDisplay {
         primary()
     }
 
+    /// The monitor's handle as a number (what keyboard and mouse mode compares the
+    /// pointer's monitor with), as Windows has it now.
     pub fn id(&self) -> u32 {
-        self.monitor.0 as usize as u32
+        self.current_monitor().0 as usize as u32
     }
 
     /// The monitor handle as Windows has it now: handles can change while Windows settles
