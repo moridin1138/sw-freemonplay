@@ -46,11 +46,8 @@ pub fn run() -> Result<()> {
     // link to a host: usually the same Wi-Fi or cable.
     match crate::link::tune(std::net::Ipv4Addr::new(8, 8, 8, 8).into()) {
         (tuning, Some(info)) => {
-            println!("Network: {}", info.summary);
-            for tip in &info.advice {
-                println!("  Tip: {tip}");
-            }
-            if tuning.is_none() && info.summary.starts_with("Wi-Fi") {
+            println!("Network: {info}");
+            if tuning.is_none() && info.wifi.is_some() {
                 println!("  (couldn't switch on low-latency mode)");
             }
             println!();

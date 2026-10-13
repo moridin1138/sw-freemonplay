@@ -19,10 +19,7 @@ pub fn tune(host: IpAddr) -> (Option<LinkTuning>, Option<NetworkInfo>) {
     match imp::tune(host) {
         Ok((inner, info)) => {
             if let Some(info) = &info {
-                tracing::info!("network: {}", info.summary);
-                for tip in &info.advice {
-                    tracing::info!("network tip: {tip}");
-                }
+                tracing::info!("network: {info}");
             }
             (inner.map(LinkTuning), info)
         }
@@ -35,29 +32,7 @@ pub fn tune(host: IpAddr) -> (Option<LinkTuning>, Option<NetworkInfo>) {
 
 #[cfg_attr(not(any(target_os = "windows", target_os = "macos", target_os = "linux")), allow(dead_code))]
 fn wired() -> NetworkInfo {
-    NetworkInfo { summary: "wired (not Wi-Fi)".into(), advice: Vec::new() }
-}
-
-/// Advice for a Wi-Fi link, from its band, signal (0 to 100) and link rate (Mbit/s).
-#[cfg_attr(not(any(target_os = "windows", target_os = "macos", target_os = "linux")), allow(dead_code))]
-/// ", link 866 Mbit/s", or nothing while the rate isn't known yet (just after joining).
-#[cfg_attr(not(any(target_os = "windows", target_os = "macos", target_os = "linux")), allow(dead_code))]
-fn link_text(mbps: f64) -> String {
-    if mbps >= 1.0 { format!(", link {mbps:.0} Mbit/s") } else { String::new() }
-}
-
-fn wifi_advice(two_point_four: bool, signal: u32, link_mbps: u32) -> Vec<String> {
-    let mut advice = Vec::new();
-    if two_point_four {
-        advice.push("on 2.4 GHz Wi-Fi: 5 GHz (or a cable) is usually much faster and steadier".to_string());
-    }
-    if signal < 50 {
-        advice.push(format!("weak Wi-Fi signal ({signal}%): move closer to the router, or use a cable"));
-    }
-    if link_mbps > 0 && link_mbps < 150 {
-        advice.push(format!("slow Wi-Fi link ({link_mbps} Mbit/s): lower the host's frame rate or bitrate"));
-    }
-    advice
+    NetworkInfo::default()
 }
 
 #[cfg(target_os = "windows")]
@@ -67,7 +42,7 @@ mod imp {
     use std::ptr::null_mut;
 
     use anyhow::{Result, bail};
-    use fmp_proto::NetworkInfo;
+    use fmp_proto::{NetworkInfo, Signal, WifiBand, WifiLink};
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::NetworkManagement::IpHelper::{
         ConvertInterfaceIndexToLuid, ConvertInterfaceLuidToGuid, GetBestInterface,
@@ -159,26 +134,32 @@ mod imp {
             }
 
             let generation = match phy {
-                7 => "Wi-Fi 4",
-                8 => "Wi-Fi 5",
-                10 => "Wi-Fi 6",
-                11 => "Wi-Fi 7",
-                4..=6 => "older Wi-Fi",
-                _ => "Wi-Fi",
+                7 => 4,
+                8 => 5,
+                10 => 6,
+                11 => 7,
+                4..=6 => 3,
+                _ => 0,
             };
             // Wi-Fi 6E's 6 GHz channels reuse low numbers, so only call it 2.4 GHz when the
             // standard rules 6 GHz out.
-            let two_point_four = (1..=14).contains(&channel) && phy < 10;
             let band = match channel {
-                0 => String::new(),
-                1..=14 if phy < 10 => ", 2.4 GHz".into(),
-                1..=14 => format!(", channel {channel}"),
-                _ => ", 5 GHz or higher".into(),
+                0 => WifiBand::Unknown,
+                1..=14 if phy < 10 => WifiBand::TwoPointFour,
+                1..=14 => WifiBand::Unknown,
+                _ => WifiBand::FiveOrHigher,
             };
-            let tuned = if streaming { ", low-latency mode on" } else { "" };
-            let summary = format!("{generation}{band}, signal {signal}%{}{tuned}", super::link_text(link_mbps as f64));
-            let advice = super::wifi_advice(two_point_four, signal, link_mbps);
-            Ok((streaming.then_some(inner), Some(NetworkInfo { summary, advice })))
+            let wifi = WifiLink {
+                generation,
+                band,
+                channel: if band == WifiBand::Unknown { channel } else { 0 },
+                width_mhz: 0,
+                signal: Signal::Percent(signal),
+                link_mbps,
+                low_latency: streaming,
+            };
+            let tips = fmp_proto::wifi_tips(band, signal, link_mbps);
+            Ok((streaming.then_some(inner), Some(NetworkInfo { wifi: Some(wifi), tips })))
         }
     }
 }
@@ -192,7 +173,7 @@ mod imp {
     use std::process::Command;
 
     use anyhow::{Context, Result};
-    use fmp_proto::NetworkInfo;
+    use fmp_proto::{NetworkInfo, Signal, WifiBand, WifiLink};
     use objc2_core_wlan::{CWChannelBand, CWPHYMode, CWWiFiClient};
 
     pub struct Inner;
@@ -210,25 +191,23 @@ mod imp {
         let (channel, phy, rssi, rate) =
             unsafe { (wifi.wlanChannel(), wifi.activePHYMode(), wifi.rssiValue(), wifi.transmitRate()) };
         let generation = match phy {
-            CWPHYMode::Mode11n => "Wi-Fi 4",
-            CWPHYMode::Mode11ac => "Wi-Fi 5",
-            CWPHYMode::Mode11ax => "Wi-Fi 6",
-            CWPHYMode::Mode11a | CWPHYMode::Mode11b | CWPHYMode::Mode11g => "older Wi-Fi",
-            _ => "Wi-Fi",
+            CWPHYMode::Mode11n => 4,
+            CWPHYMode::Mode11ac => 5,
+            CWPHYMode::Mode11ax => 6,
+            CWPHYMode::Mode11a | CWPHYMode::Mode11b | CWPHYMode::Mode11g => 3,
+            _ => 0,
         };
         // SAFETY: as above.
-        let band = channel.map(|c| unsafe { c.channelBand() });
-        let band_name = match band {
-            Some(CWChannelBand::Band2GHz) => ", 2.4 GHz",
-            Some(CWChannelBand::Band5GHz) => ", 5 GHz",
-            Some(CWChannelBand::Band6GHz) => ", 6 GHz",
-            _ => "",
+        let band = match channel.map(|c| unsafe { c.channelBand() }) {
+            Some(CWChannelBand::Band2GHz) => WifiBand::TwoPointFour,
+            Some(CWChannelBand::Band5GHz) => WifiBand::Five,
+            Some(CWChannelBand::Band6GHz) => WifiBand::Six,
+            _ => WifiBand::Unknown,
         };
-        // RSSI as a rough 0 to 100 quality, as Windows reports it (-100 dBm is 0, -50 is 100).
-        let signal = ((rssi + 100) * 2).clamp(0, 100) as u32;
-        let summary = format!("{generation}{band_name}, signal {rssi} dBm{}", super::link_text(rate));
-        let advice = super::wifi_advice(band == Some(CWChannelBand::Band2GHz), signal, rate as u32);
-        Ok((None, Some(NetworkInfo { summary, advice })))
+        let link_mbps = rate.max(0.0) as u32;
+        let wifi = WifiLink { generation, band, signal: Signal::Dbm(rssi as i32), link_mbps, ..Default::default() };
+        let tips = fmp_proto::wifi_tips(band, fmp_proto::rssi_quality(rssi as i32), link_mbps);
+        Ok((None, Some(NetworkInfo { wifi: Some(wifi), tips })))
     }
 
     /// The interface the route to `host` uses (e.g. "en0").
@@ -248,7 +227,7 @@ mod imp {
     use std::net::IpAddr;
 
     use anyhow::{Context, Result};
-    use fmp_proto::NetworkInfo;
+    use fmp_proto::{NetworkInfo, Signal, WifiBand, WifiLink};
     use zbus::blocking::{Connection, Proxy};
     use zbus::zvariant::OwnedObjectPath;
 
@@ -274,14 +253,14 @@ mod imp {
         let mhz = ap.get_property::<u32>("Frequency")?;
         let signal = ap.get_property::<u8>("Strength")? as u32;
         let band = match mhz {
-            2400..=2500 => ", 2.4 GHz",
-            5000..=5900 => ", 5 GHz",
-            5925..=7125 => ", 6 GHz",
-            _ => "",
+            2400..=2500 => WifiBand::TwoPointFour,
+            5000..=5900 => WifiBand::Five,
+            5925..=7125 => WifiBand::Six,
+            _ => WifiBand::Unknown,
         };
-        let summary = format!("Wi-Fi{band}, signal {signal}%{}", super::link_text(link_mbps as f64));
-        let advice = super::wifi_advice((2400..=2500).contains(&mhz), signal, link_mbps);
-        Ok((None, Some(NetworkInfo { summary, advice })))
+        let wifi = WifiLink { band, signal: Signal::Percent(signal), link_mbps, ..Default::default() };
+        let tips = fmp_proto::wifi_tips(band, signal, link_mbps);
+        Ok((None, Some(NetworkInfo { wifi: Some(wifi), tips })))
     }
 
     /// The interface whose route to `dest` is most specific, from /proc/net/route.
@@ -314,18 +293,5 @@ mod imp {
 
     pub fn tune(_host: IpAddr) -> Result<(Option<Inner>, Option<NetworkInfo>)> {
         Ok((None, None))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn advice_for_poor_wifi() {
-        assert!(wifi_advice(false, 80, 866).is_empty());
-        let tips = wifi_advice(true, 35, 72);
-        assert_eq!(tips.len(), 3);
-        assert!(tips[1].contains("35%"));
     }
 }

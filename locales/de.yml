@@ -179,3 +179,23 @@ host.error.start: "Freemonplay Host konnte nicht starten: %{error}"
 
 host.notice.no_frames_mac: "Noch kein Bild. Erlaube die Bildschirmaufnahme für Freemonplay Host in Systemeinstellungen > Datenschutz & Sicherheit und starte es neu."
 host.notice.no_frames: "Noch kein Bild. Trenne und verbinde erneut."
+
+host.net.wired: "Kabel"
+host.net.wifi: "WLAN"
+host.net.wifi_older: "Älteres WLAN"
+host.net.wifi_generation: "WLAN %{n}"
+host.net.band_2_4: "2,4 GHz"
+host.net.band_5_or_higher: "5 GHz oder höher"
+host.net.channel: "Kanal %{n}"
+host.net.signal_dbm: "Signal %{dbm} dBm"
+host.net.signal_percent: "Signal %{percent} %"
+host.net.link: "Verbindung %{mbps} Mbit/s"
+host.net.low_latency: "Modus für geringe Latenz an"
+host.net.tip_2_4: "Im 2,4-GHz-WLAN: 5 GHz oder ein Kabel ist meist schneller und stabiler."
+host.net.tip_weak: "Schwaches WLAN-Signal: näher an den Router gehen oder ein Kabel nutzen."
+host.net.tip_slow: "Langsame WLAN-Verbindung: Bildrate oder Bitrate senken."
+host.net.tip_awdl: "AirDrop, Handoff oder die universelle Steuerung können Verzögerungen verursachen; beim Streamen ausschalten."
+
+# The Mac apps' system prompts (bundle.sh puts these in each app's InfoPlist.strings)
+host.plist.local_network: "Freemonplay Host findet Bildschirme im lokalen Netzwerk und überträgt an sie."
+screen.plist.local_network: "Freemonplay Screen findet im lokalen Netzwerk Computer, für die es als Bildschirm dient."

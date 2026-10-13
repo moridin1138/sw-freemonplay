@@ -36,6 +36,10 @@ otherwise.
 
 Missing lines fall back to English, so a partial translation is fine to start with.
 
+The same file covers the Mac apps' system prompts (`*.plist.*` keys). The Windows installers'
+few lines are in `build/windows/languages.iss`; a new language there also needs Inno Setup's
+messages file for it (most languages come with Inno Setup).
+
 To see the apps in a language without changing the computer's, set `FMP_LANG`, for example
 `FMP_LANG=it freemonplay-screen`.
 

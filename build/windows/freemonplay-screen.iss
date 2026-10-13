@@ -34,6 +34,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; Close a running copy before replacing it.
 CloseApplications=yes
 
+#include "languages.iss"
+
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
@@ -47,9 +49,9 @@ Source: "..\..\README.md"; DestDir: "{app}"
 Type: files; Name: "{app}\freemonplay-client.exe"
 
 [Icons]
-Name: "{group}\Freemonplay Screen"; Filename: "{app}\freemonplay-screen.exe"; Comment: "Use this computer as an extra screen for a Mac"
+Name: "{group}\Freemonplay Screen"; Filename: "{app}\freemonplay-screen.exe"; Comment: "{cm:ScreenComment}"
 Name: "{group}\Uninstall Freemonplay Screen"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\Freemonplay Screen"; Filename: "{app}\freemonplay-screen.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\freemonplay-screen.exe"; Description: "Start Freemonplay Screen"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\freemonplay-screen.exe"; Description: "{cm:LaunchProgram,Freemonplay Screen}"; Flags: nowait postinstall skipifsilent

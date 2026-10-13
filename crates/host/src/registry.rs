@@ -71,8 +71,8 @@ impl SessionInfo {
             lines.push(Some(t!("host.detail.loss", percent = format!("{:.1}", self.loss_pct)).into_owned()));
         }
         if let Some(network) = &self.network {
-            lines.push(Some(t!("host.detail.network", summary = network.summary).into_owned()));
-            lines.extend(network.advice.iter().map(|tip| Some(format!("    {}", t!("host.menu.tip", tip = tip)))));
+            lines.push(Some(t!("host.detail.network", summary = crate::network_text::summary(network)).into_owned()));
+            lines.extend(crate::network_text::tips(network).iter().map(|tip| Some(format!("    {}", t!("host.menu.tip", tip = tip)))));
         }
         lines.push(None);
         match (self.latency_ms(), self.client) {

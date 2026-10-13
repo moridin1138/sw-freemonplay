@@ -179,3 +179,23 @@ host.error.start: "Freemonplay Host 无法启动：%{error}"
 
 host.notice.no_frames_mac: "尚无画面。请在“系统设置 > 隐私与安全性”中允许 Freemonplay Host 进行屏幕录制，然后重启它。"
 host.notice.no_frames: "尚无画面。请尝试断开后重新连接。"
+
+host.net.wired: "有线"
+host.net.wifi: "Wi-Fi"
+host.net.wifi_older: "旧款 Wi-Fi"
+host.net.wifi_generation: "Wi-Fi %{n}"
+host.net.band_2_4: "2.4 GHz"
+host.net.band_5_or_higher: "5 GHz 或更高"
+host.net.channel: "信道 %{n}"
+host.net.signal_dbm: "信号 %{dbm} dBm"
+host.net.signal_percent: "信号 %{percent}%"
+host.net.link: "连接速率 %{mbps} Mbit/s"
+host.net.low_latency: "低延迟模式已开启"
+host.net.tip_2_4: "正在使用 2.4 GHz Wi-Fi：5 GHz 或有线连接通常更快更稳定。"
+host.net.tip_weak: "Wi-Fi 信号弱：请靠近路由器或使用有线连接。"
+host.net.tip_slow: "Wi-Fi 连接速率低：请降低帧率或码率。"
+host.net.tip_awdl: "隔空投送、接力或通用控制可能导致延迟；串流时请关闭它们。"
+
+# The Mac apps' system prompts (bundle.sh puts these in each app's InfoPlist.strings)
+host.plist.local_network: "Freemonplay Host 会在本地网络中查找屏幕并向其串流。"
+screen.plist.local_network: "Freemonplay Screen 会在本地网络中查找可为其充当屏幕的电脑。"

@@ -41,8 +41,10 @@ CloseApplications=force
 ; The "start at sign-in" task writes the user's own Run key.
 UsedUserAreasWarning=no
 
+#include "languages.iss"
+
 [Tasks]
-Name: "startup"; Description: "Start Freemonplay Host when I sign in"
+Name: "startup"; Description: "{cm:StartupTask}"
 
 [Files]
 Source: "{#Source}\freemonplay-host.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -51,15 +53,15 @@ Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"
 Source: "..\..\README.md"; DestDir: "{app}"
 
 [Icons]
-Name: "{group}\Freemonplay Host"; Filename: "{app}\freemonplay-host.exe"; Comment: "Give this PC extra screens"
+Name: "{group}\Freemonplay Host"; Filename: "{app}\freemonplay-host.exe"; Comment: "{cm:HostComment}"
 Name: "{group}\Uninstall Freemonplay Host"; Filename: "{uninstallexe}"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "freemonplay"; ValueData: """{app}\freemonplay-host.exe"""; Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
-Filename: "{app}\freemonplay-host.exe"; Parameters: "--install-display-driver ""{app}\driver"" --allow-firewall"; StatusMsg: "Installing the display driver and the firewall rule..."; Flags: runhidden waituntilterminated
-Filename: "{app}\freemonplay-host.exe"; Description: "Start Freemonplay Host"; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{app}\freemonplay-host.exe"; Parameters: "--install-display-driver ""{app}\driver"" --allow-firewall"; StatusMsg: "{cm:InstallingDriver}"; Flags: runhidden waituntilterminated
+Filename: "{app}\freemonplay-host.exe"; Description: "{cm:LaunchProgram,Freemonplay Host}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
 Filename: "{app}\freemonplay-host.exe"; Parameters: "--quit"; Flags: runhidden waituntilterminated; RunOnceId: "StopHost"

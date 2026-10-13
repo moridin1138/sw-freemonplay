@@ -179,3 +179,23 @@ host.error.start: "Freemonplay Host başlatılamadı: %{error}"
 
 host.notice.no_frames_mac: "Henüz görüntü yok. Sistem Ayarları > Gizlilik ve Güvenlik'te Freemonplay Host için Ekran Kaydı'na izin verip yeniden başlatın."
 host.notice.no_frames: "Henüz görüntü yok. Bağlantıyı kesip yeniden bağlanmayı deneyin."
+
+host.net.wired: "Kablolu"
+host.net.wifi: "Wi-Fi"
+host.net.wifi_older: "Eski Wi-Fi"
+host.net.wifi_generation: "Wi-Fi %{n}"
+host.net.band_2_4: "2,4 GHz"
+host.net.band_5_or_higher: "5 GHz veya üstü"
+host.net.channel: "kanal %{n}"
+host.net.signal_dbm: "sinyal %{dbm} dBm"
+host.net.signal_percent: "sinyal %{percent}%"
+host.net.link: "bağlantı %{mbps} Mbit/s"
+host.net.low_latency: "düşük gecikme modu açık"
+host.net.tip_2_4: "2,4 GHz Wi-Fi'da: 5 GHz veya kablo genellikle daha hızlı ve kararlıdır."
+host.net.tip_weak: "Zayıf Wi-Fi sinyali: yönlendiriciye yaklaşın veya kablo kullanın."
+host.net.tip_slow: "Yavaş Wi-Fi bağlantısı: kare hızını veya bit hızını düşürün."
+host.net.tip_awdl: "AirDrop, Handoff veya Evrensel Denetim gecikmeye yol açabilir; yayın sırasında kapatın."
+
+# The Mac apps' system prompts (bundle.sh puts these in each app's InfoPlist.strings)
+host.plist.local_network: "Freemonplay Host yerel ağınızdaki ekranları bulur ve onlara yayın yapar."
+screen.plist.local_network: "Freemonplay Screen, yerel ağınızda ekranı olabileceği bilgisayarları bulur."

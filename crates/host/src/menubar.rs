@@ -383,8 +383,9 @@ impl Controller {
         if sessions.is_empty() {
             menu.addItem(&self.item(&t!("host.menu.no_screens"), None, 0));
         } else if let Some(network) = crate::platform::network::describe() {
-            menu.addItem(&self.item(&t!("host.menu.network_mac", summary = network.summary), None, 0));
-            for tip in &network.advice {
+            let summary = crate::network_text::summary(&network);
+            menu.addItem(&self.item(&t!("host.menu.network_mac", summary = summary), None, 0));
+            for tip in &crate::network_text::tips(&network) {
                 menu.addItem(&self.item(&format!("    {}", t!("host.menu.tip", tip = tip)), None, 0));
             }
         }

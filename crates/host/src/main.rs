@@ -16,6 +16,7 @@ mod kvm;
 mod menubar;
 #[cfg(target_os = "macos")]
 mod welcome;
+mod network_text;
 mod parking;
 mod pattern;
 mod platform;

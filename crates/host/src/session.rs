@@ -222,10 +222,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
         tracing::info!("paired with {who}");
     }
     if let Some(network) = crate::platform::network::describe() {
-        tracing::info!("this Mac's network: {}", network.summary);
-        for tip in &network.advice {
-            tracing::info!("network tip: {tip}");
-        }
+        tracing::info!("this computer's network: {network}");
     }
     if hello.input_only {
         return input_only(&ctx, conn, send, recv, hello, screen_name, issued_token).await;
@@ -395,7 +392,7 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
                 Some(ClientMsg::ReturnControl(at)) => ctx.kvm.return_control(session.id(), at),
                 Some(ClientMsg::Clipboard(text)) => ctx.clipboard.copied_on_client(session.id(), Item::Text(text)),
                 Some(ClientMsg::Network(network)) => {
-                    tracing::info!("{who}: network: {}", network.summary);
+                    tracing::info!("{who}: network: {network}");
                     session.update_network(network);
                 }
                 Some(ClientMsg::Stats(stats)) => {

@@ -16,7 +16,7 @@ pub mod hid;
 pub mod language;
 pub mod pairing;
 
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 pub const ALPN: &[u8] = b"freemonplay/1";
 pub const SERVICE_TYPE: &str = "_freemonplay._udp.local.";
 pub const DEFAULT_PORT: u16 = 47800;
@@ -128,12 +128,124 @@ pub enum RemoteInput {
     Key { usage: u16, pressed: bool },
 }
 
-/// How the client reaches the host, described for people (e.g. "Wi-Fi 6, 5 GHz or higher,
-/// signal 80%, link 866 Mbit/s"), with tips when the link is likely to limit streaming.
+/// How a computer reaches the other one: facts about its link, and tips when the link is
+/// likely to limit streaming. Sent as facts so each side words them in its own language;
+/// `Display` gives English, for logs.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NetworkInfo {
-    pub summary: String,
-    pub advice: Vec<String>,
+    /// `None`: wired (or not Wi-Fi).
+    pub wifi: Option<WifiLink>,
+    pub tips: Vec<NetworkTip>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WifiLink {
+    /// 4 to 7 (Wi-Fi 4 is 802.11n), 3 for anything older, 0 when unknown.
+    pub generation: u8,
+    pub band: WifiBand,
+    /// 0 when unknown.
+    pub channel: u32,
+    /// Channel width in MHz, 0 when unknown.
+    pub width_mhz: u32,
+    pub signal: Signal,
+    /// 0 while unknown (just after joining).
+    pub link_mbps: u32,
+    /// Windows' Wi-Fi media streaming mode is on.
+    pub low_latency: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WifiBand {
+    #[default]
+    Unknown,
+    TwoPointFour,
+    Five,
+    Six,
+    /// 5 GHz or 6 GHz (Windows can't always tell).
+    FiveOrHigher,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Signal {
+    Dbm(i32),
+    /// 0 to 100, as Windows and NetworkManager report it.
+    Percent(u32),
+}
+
+impl Default for Signal {
+    fn default() -> Self {
+        Signal::Percent(0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NetworkTip {
+    /// On 2.4 GHz: 5 GHz or a cable is usually faster and steadier.
+    TwoPointFour,
+    /// Weak signal: move closer to the router or use a cable.
+    WeakSignal,
+    /// Slow link: lower the frame rate or bitrate.
+    SlowLink,
+    /// macOS AWDL (AirDrop, Handoff, Universal Control) is busy and can cause delays.
+    Awdl,
+}
+
+impl std::fmt::Display for NetworkInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Some(w) = &self.wifi else { return write!(f, "wired") };
+        match w.generation {
+            0 => write!(f, "Wi-Fi")?,
+            3 => write!(f, "older Wi-Fi")?,
+            n => write!(f, "Wi-Fi {n}")?,
+        }
+        match w.band {
+            WifiBand::Unknown => {}
+            WifiBand::TwoPointFour => write!(f, ", 2.4 GHz")?,
+            WifiBand::Five => write!(f, ", 5 GHz")?,
+            WifiBand::Six => write!(f, ", 6 GHz")?,
+            WifiBand::FiveOrHigher => write!(f, ", 5 GHz or higher")?,
+        }
+        if w.channel > 0 {
+            write!(f, ", channel {}", w.channel)?;
+        }
+        if w.width_mhz > 0 {
+            write!(f, " ({} MHz)", w.width_mhz)?;
+        }
+        match w.signal {
+            Signal::Dbm(dbm) => write!(f, ", signal {dbm} dBm")?,
+            Signal::Percent(p) => write!(f, ", signal {p}%")?,
+        }
+        if w.link_mbps > 0 {
+            write!(f, ", link {} Mbit/s", w.link_mbps)?;
+        }
+        if w.low_latency {
+            write!(f, ", low-latency mode on")?;
+        }
+        for tip in &self.tips {
+            write!(f, "; tip: {tip:?}")?;
+        }
+        Ok(())
+    }
+}
+
+/// The tips for a Wi-Fi link, from its band, signal (0 to 100) and link rate (Mbit/s).
+pub fn wifi_tips(band: WifiBand, signal: u32, link_mbps: u32) -> Vec<NetworkTip> {
+    let mut tips = Vec::new();
+    if band == WifiBand::TwoPointFour {
+        tips.push(NetworkTip::TwoPointFour);
+    }
+    if signal < 50 {
+        tips.push(NetworkTip::WeakSignal);
+    }
+    if link_mbps > 0 && link_mbps < 150 {
+        tips.push(NetworkTip::SlowLink);
+    }
+    tips
+}
+
+/// RSSI as a rough 0 to 100 quality, as Windows reports it (-100 dBm is 0, -50 is 100).
+pub fn rssi_quality(dbm: i32) -> u32 {
+    ((dbm + 100) * 2).clamp(0, 100) as u32
 }
 
 /// What the client measured over the last reporting window, on its own clock.
@@ -405,6 +517,23 @@ pub async fn read_msg<T: DeserializeOwned>(stream: &mut quinn::RecvStream) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tips_for_poor_wifi() {
+        assert!(wifi_tips(WifiBand::Five, 80, 866).is_empty());
+        let tips = wifi_tips(WifiBand::TwoPointFour, 35, 72);
+        assert_eq!(tips, [NetworkTip::TwoPointFour, NetworkTip::WeakSignal, NetworkTip::SlowLink]);
+        assert_eq!(rssi_quality(-46), 100);
+        assert_eq!(rssi_quality(-80), 40);
+    }
+
+    #[test]
+    fn describes_a_link_in_english() {
+        let wifi = WifiLink { generation: 6, band: WifiBand::Five, signal: Signal::Dbm(-46), link_mbps: 1020, ..Default::default() };
+        let info = NetworkInfo { wifi: Some(wifi), tips: vec![] };
+        assert_eq!(info.to_string(), "Wi-Fi 6, 5 GHz, signal -46 dBm, link 1020 Mbit/s");
+        assert_eq!(NetworkInfo::default().to_string(), "wired");
+    }
 
     #[test]
     fn roundtrip_input() {

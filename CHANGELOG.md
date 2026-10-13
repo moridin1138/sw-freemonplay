@@ -6,6 +6,14 @@ publishes it as the release notes.
 
 ## [Unreleased]
 
+Hosts and screens must both be updated: the protocol changed (version 12).
+
+### Changed
+- **The rest of the text is translated:** the Wi-Fi details and tips in the host's menu
+  (screens now send facts about their link, which each app words in its own language), the
+  Windows installers (in the same six languages, following Windows' display language) and
+  the Mac apps' local network prompt.
+
 ### Fixed
 - **Windows host: the setup guide's firewall check** now reads Windows Firewall's rules
   for the network the PC is on, so a rule made by accepting Windows' own "allow access"

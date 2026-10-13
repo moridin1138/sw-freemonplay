@@ -6,7 +6,7 @@ use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use fmp_proto::NetworkInfo;
+use fmp_proto::{NetworkInfo, NetworkTip, Signal, WifiBand, WifiLink};
 use objc2_core_wlan::{CWChannelBand, CWChannelWidth, CWPHYMode, CWWiFiClient};
 
 /// The menu refreshes often; the answer changes rarely.
@@ -44,47 +44,41 @@ fn wifi() -> Option<NetworkInfo> {
         )
     };
     let generation = match phy {
-        CWPHYMode::Mode11n => "Wi-Fi 4",
-        CWPHYMode::Mode11ac => "Wi-Fi 5",
-        CWPHYMode::Mode11ax => "Wi-Fi 6",
-        CWPHYMode::Mode11a | CWPHYMode::Mode11b | CWPHYMode::Mode11g => "older Wi-Fi",
-        _ => "Wi-Fi",
+        CWPHYMode::Mode11n => 4,
+        CWPHYMode::Mode11ac => 5,
+        CWPHYMode::Mode11ax => 6,
+        CWPHYMode::Mode11a | CWPHYMode::Mode11b | CWPHYMode::Mode11g => 3,
+        _ => 0,
     };
-    let band_name = match band {
-        CWChannelBand::Band2GHz => "2.4 GHz",
-        CWChannelBand::Band5GHz => "5 GHz",
-        CWChannelBand::Band6GHz => "6 GHz",
-        _ => "unknown band",
+    let band = match band {
+        CWChannelBand::Band2GHz => WifiBand::TwoPointFour,
+        CWChannelBand::Band5GHz => WifiBand::Five,
+        CWChannelBand::Band6GHz => WifiBand::Six,
+        _ => WifiBand::Unknown,
     };
-    let mhz = match width {
+    let width_mhz = match width {
         CWChannelWidth::Width20MHz => 20,
         CWChannelWidth::Width40MHz => 40,
         CWChannelWidth::Width80MHz => 80,
         CWChannelWidth::Width160MHz => 160,
         _ => 0,
     };
-    let width = if mhz > 0 { format!(" {mhz} MHz") } else { String::new() };
-    let summary =
-        format!(
-            "{generation}, {band_name} (channel {number}{width}), signal {rssi} dBm{}",
-            if rate >= 1.0 { format!(", link {rate:.0} Mbit/s") } else { String::new() }
-        );
-
-    let mut advice = Vec::new();
-    if band == CWChannelBand::Band2GHz {
-        advice.push("this Mac is on 2.4 GHz Wi-Fi: 5 GHz (or a cable) is usually much faster and steadier".to_string());
-    }
-    if rssi < -70 {
-        advice.push(format!("weak Wi-Fi signal ({rssi} dBm): move closer to the router, or use a cable"));
-    }
+    let rssi = rssi as i32;
+    let link_mbps = rate.max(0.0) as u32;
+    let wifi = WifiLink {
+        generation,
+        band,
+        channel: number as u32,
+        width_mhz,
+        signal: Signal::Dbm(rssi),
+        link_mbps,
+        low_latency: false,
+    };
+    let mut tips = fmp_proto::wifi_tips(band, fmp_proto::rssi_quality(rssi), link_mbps);
     if awdl_active() {
-        advice.push(
-            "AirDrop, Handoff or Universal Control is keeping a second Wi-Fi link (AWDL) busy, which \
-             can cause latency spikes; turning them off while streaming may help"
-                .to_string(),
-        );
+        tips.push(NetworkTip::Awdl);
     }
-    Some(NetworkInfo { summary, advice })
+    Some(NetworkInfo { wifi: Some(wifi), tips })
 }
 
 /// Whether the AWDL interface is up and in use (it hops the radio between channels).
@@ -101,8 +95,8 @@ mod tests {
     #[test]
     fn describes_this_mac() {
         if let Some(info) = super::describe() {
-            println!("{}: {:?}", info.summary, info.advice);
-            assert!(info.summary.contains("Mbit/s"));
+            println!("{info}");
+            assert!(info.wifi.is_some());
         }
     }
 }

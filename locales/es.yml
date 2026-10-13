@@ -179,3 +179,23 @@ host.error.start: "Freemonplay Host no pudo iniciarse: %{error}"
 
 host.notice.no_frames_mac: "Aún no hay imagen. Permite la grabación de pantalla para Freemonplay Host en Ajustes del Sistema > Privacidad y seguridad y reinícialo."
 host.notice.no_frames: "Aún no hay imagen. Prueba a desconectar y volver a conectar."
+
+host.net.wired: "Por cable"
+host.net.wifi: "Wi-Fi"
+host.net.wifi_older: "Wi-Fi antiguo"
+host.net.wifi_generation: "Wi-Fi %{n}"
+host.net.band_2_4: "2,4 GHz"
+host.net.band_5_or_higher: "5 GHz o más"
+host.net.channel: "canal %{n}"
+host.net.signal_dbm: "señal %{dbm} dBm"
+host.net.signal_percent: "señal %{percent} %"
+host.net.link: "enlace %{mbps} Mbit/s"
+host.net.low_latency: "modo de baja latencia activado"
+host.net.tip_2_4: "En Wi-Fi de 2,4 GHz: 5 GHz o un cable suele ser más rápido y estable."
+host.net.tip_weak: "Señal Wi-Fi débil: acércate al router o usa un cable."
+host.net.tip_slow: "Enlace Wi-Fi lento: baja la frecuencia de fotogramas o la tasa de bits."
+host.net.tip_awdl: "AirDrop, Handoff o Control universal pueden causar retrasos; desactívalos mientras transmites."
+
+# The Mac apps' system prompts (bundle.sh puts these in each app's InfoPlist.strings)
+host.plist.local_network: "Freemonplay Host busca pantallas en tu red local y transmite a ellas."
+screen.plist.local_network: "Freemonplay Screen busca en tu red local ordenadores para los que hacer de pantalla."

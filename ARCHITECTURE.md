@@ -82,6 +82,13 @@ it), falling back to English key by key. Adding a file adds a language without c
 changes. For Chinese the screen app loads a system Chinese font into egui, whose own fonts
 have none. A test checks every file against `en.yml`. Logs stay in English.
 
+Text that crosses between the computers is sent as facts, not words: a screen's network
+link is a `NetworkInfo` (Wi-Fi generation, band, signal, link rate, and `NetworkTip`s), which
+the host words in its own language (`network_text.rs`). The Mac apps' local network prompt
+comes from the same files (`*.plist.*` keys, written into each app's `InfoPlist.strings` by
+`bundle.sh`), and the Windows installers have their own short list in
+`build/windows/languages.iss`.
+
 ## Protocol
 
 QUIC (`quinn`, TLS via `rustls` with a self-signed host certificate). Messages are

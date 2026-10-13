@@ -41,7 +41,7 @@ if $client; then
     bundle_id=io.github.moridin1138.freemonplay.screen
     # An ordinary app with a Dock icon and windows.
     ui_element=false
-    network_reason="Freemonplay Screen finds computers to be a screen for on your local network."
+    text_prefix=screen
 else
     package=freemonplay-host
     name="Freemonplay Host"
@@ -50,9 +50,13 @@ else
     bundle_id=io.github.moridin1138.freemonplay
     # Menu bar only: no Dock icon or app menu.
     ui_element=true
-    network_reason="Freemonplay Host finds and streams to screens on your local network."
+    text_prefix=host
 fi
 app="target/$name.app"
+
+# A line of text from a language file (locales/<language>.yml): `key: "text"`.
+text() { sed -n "s/^$2: \"\(.*\)\"\$/\1/p" "locales/$1.yml"; }
+network_reason=$(text en "$text_prefix.plist.local_network")
 
 if $universal; then
     rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
@@ -78,6 +82,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleIdentifier</key>
     <string>${bundle_id}</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
     <key>CFBundleName</key>
     <string>${name}</string>
     <key>CFBundleDisplayName</key>
@@ -108,6 +114,16 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+# The system prompts in each language macOS can show them in (zh-CN is zh-Hans there).
+for file in locales/*.yml; do
+    language=$(basename "$file" .yml)
+    reason=$(text "$language" "$text_prefix.plist.local_network")
+    [ -n "$reason" ] || continue
+    lproj="$app/Contents/Resources/${language/zh-CN/zh-Hans}.lproj"
+    mkdir -p "$lproj"
+    printf '"NSLocalNetworkUsageDescription" = "%s";\n' "$reason" > "$lproj/InfoPlist.strings"
+done
 
 identity="freemonplay Local Signing"
 if [ -n "${FMP_SIGN_IDENTITY:-}" ]; then

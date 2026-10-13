@@ -181,3 +181,23 @@ host.error.start: "Freemonplay Host couldn't start: %{error}"
 
 host.notice.no_frames_mac: "No picture yet. Allow Screen Recording for Freemonplay Host in System Settings > Privacy & Security, then restart it."
 host.notice.no_frames: "No picture yet. Try disconnecting and connecting again."
+
+host.net.wired: "Wired"
+host.net.wifi: "Wi-Fi"
+host.net.wifi_older: "Older Wi-Fi"
+host.net.wifi_generation: "Wi-Fi %{n}"
+host.net.band_2_4: "2.4 GHz"
+host.net.band_5_or_higher: "5 GHz or higher"
+host.net.channel: "channel %{n}"
+host.net.signal_dbm: "signal %{dbm} dBm"
+host.net.signal_percent: "signal %{percent}%"
+host.net.link: "link %{mbps} Mbit/s"
+host.net.low_latency: "low-latency mode on"
+host.net.tip_2_4: "On 2.4 GHz Wi-Fi: 5 GHz or a cable is usually faster and steadier."
+host.net.tip_weak: "Weak Wi-Fi signal: move closer to the router or use a cable."
+host.net.tip_slow: "Slow Wi-Fi link: lower the frame rate or bitrate."
+host.net.tip_awdl: "AirDrop, Handoff or Universal Control can cause delays; turn them off while streaming."
+
+# The Mac apps' system prompts (bundle.sh puts these in each app's InfoPlist.strings)
+host.plist.local_network: "Freemonplay Host finds and streams to screens on your local network."
+screen.plist.local_network: "Freemonplay Screen finds computers to be a screen for on your local network."
