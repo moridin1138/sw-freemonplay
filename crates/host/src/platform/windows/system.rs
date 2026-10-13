@@ -49,12 +49,158 @@ pub fn driver_package() -> Option<PathBuf> {
     ["driver", "VirtualDisplayDriver"].iter().map(|d| dir.join(d)).find(|d| d.join("MttVDD.inf").exists())
 }
 
-/// Whether our firewall rule exists. Reading rules needs no administrator rights.
+/// Whether Windows Firewall lets screens reach this program on the networks this PC is on
+/// now. Any rule counts, including one made by accepting Windows' own "allow access"
+/// prompt (often for private networks only). Reading the rules needs no administrator rights.
 pub fn firewall_allowed() -> bool {
-    quiet_command("netsh")
-        .args(["advfirewall", "firewall", "show", "rule", &format!("name={FIREWALL_RULE}")])
-        .output()
-        .is_ok_and(|o| o.status.success())
+    match firewall::allows(&exe()) {
+        Ok(allowed) => allowed,
+        Err(e) => {
+            tracing::debug!("couldn't read the firewall rules ({e}); looking for ours by name");
+            quiet_command("netsh")
+                .args(["advfirewall", "firewall", "show", "rule", &format!("name={FIREWALL_RULE}")])
+                .output()
+                .is_ok_and(|o| o.status.success())
+        }
+    }
+}
+
+mod firewall {
+    //! Windows Firewall's rules, through its COM interface (`INetFwPolicy2`).
+
+    use std::path::Path;
+
+    use windows::Win32::NetworkManagement::WindowsFirewall::{
+        INetFwPolicy2, INetFwRule, NET_FW_ACTION_ALLOW, NET_FW_IP_PROTOCOL_ANY, NET_FW_IP_PROTOCOL_UDP,
+        NET_FW_PROFILE_TYPE2, NET_FW_PROFILE2_DOMAIN, NET_FW_PROFILE2_PRIVATE, NET_FW_PROFILE2_PUBLIC,
+        NET_FW_RULE_DIR_IN, NetFwPolicy2,
+    };
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx};
+    use windows::Win32::System::Ole::IEnumVARIANT;
+    use windows::Win32::System::Variant::{VARIANT, VariantClear};
+    use windows::core::{Interface, Result};
+
+    /// An inbound rule for our program: which network profiles it covers, and whether it
+    /// allows (rather than blocks).
+    #[derive(Debug, Clone, Copy)]
+    pub(super) struct Rule {
+        pub profiles: i32,
+        pub allow: bool,
+    }
+
+    /// Per active network profile: the firewall is off there, or a rule allows the program
+    /// and none blocks it (a block wins, as in the firewall itself).
+    pub fn allows(exe: &Path) -> Result<bool> {
+        // SAFETY: COM calls on objects we create here. Joining the multithreaded apartment is
+        // harmless when this thread is already in it (the host pins it at startup).
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            let policy: INetFwPolicy2 = CoCreateInstance(&NetFwPolicy2, None, CLSCTX_INPROC_SERVER)?;
+            let rules = rules_for(&policy, exe)?;
+            let active = policy.CurrentProfileTypes()?;
+            for profile in [NET_FW_PROFILE2_DOMAIN, NET_FW_PROFILE2_PRIVATE, NET_FW_PROFILE2_PUBLIC] {
+                if active & profile.0 == 0 || !policy.get_FirewallEnabled(profile)?.as_bool() {
+                    continue;
+                }
+                if policy.get_BlockAllInboundTraffic(profile)?.as_bool() || !decide(&rules, profile) {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+    }
+
+    /// Whether `rules` let the program through on `profile`.
+    pub(super) fn decide(rules: &[Rule], profile: NET_FW_PROFILE_TYPE2) -> bool {
+        let applies = |r: &&Rule| r.profiles & profile.0 != 0;
+        let mut matching = rules.iter().filter(applies);
+        matching.clone().any(|r| r.allow) && !matching.any(|r| !r.allow)
+    }
+
+    /// The enabled inbound rules for this program that cover UDP.
+    unsafe fn rules_for(policy: &INetFwPolicy2, exe: &Path) -> Result<Vec<Rule>> {
+        let exe = exe.to_string_lossy().to_lowercase();
+        let mut out = Vec::new();
+        // SAFETY: walking the rule collection's enumerator; each VARIANT is cleared after use.
+        unsafe {
+            let all: IEnumVARIANT = policy.Rules()?._NewEnum()?.cast()?;
+            loop {
+                let mut item = [VARIANT::default()];
+                let mut fetched = 0u32;
+                if all.Next(&mut item, &mut fetched).is_err() || fetched == 0 {
+                    break;
+                }
+                let rule = (*item[0].Anonymous.Anonymous).Anonymous.pdispVal.as_ref().and_then(|d| d.cast::<INetFwRule>().ok());
+                if let Some(rule) = rule
+                    && let Some(r) = check(&rule, &exe)
+                {
+                    out.push(r);
+                }
+                let _ = VariantClear(&mut item[0]);
+            }
+        }
+        Ok(out)
+    }
+
+    unsafe fn check(rule: &INetFwRule, exe: &str) -> Option<Rule> {
+        // SAFETY: reading properties of a rule object.
+        unsafe {
+            let app = expand(&rule.ApplicationName().ok()?.to_string()).to_lowercase();
+            let protocol = rule.Protocol().ok()?;
+            let relevant = app == exe
+                && rule.Direction().ok()? == NET_FW_RULE_DIR_IN
+                && rule.Enabled().ok()?.as_bool()
+                && (protocol == NET_FW_IP_PROTOCOL_ANY.0 || protocol == NET_FW_IP_PROTOCOL_UDP.0);
+            relevant.then(|| Some(Rule { profiles: rule.Profiles().ok()?, allow: rule.Action().ok()? == NET_FW_ACTION_ALLOW }))?
+        }
+    }
+
+    /// Rules may name programs with environment variables (`%ProgramFiles%\...`).
+    fn expand(path: &str) -> String {
+        let mut out = String::new();
+        let mut rest = path;
+        while let Some(start) = rest.find('%') {
+            let Some(len) = rest[start + 1..].find('%') else { break };
+            let name = &rest[start + 1..start + 1 + len];
+            out.push_str(&rest[..start]);
+            out.push_str(&std::env::var(name).unwrap_or_else(|_| format!("%{name}%")));
+            rest = &rest[start + 2 + len..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn a_block_wins_and_profiles_matter() {
+            let private_allow = Rule { profiles: NET_FW_PROFILE2_PRIVATE.0, allow: true };
+            let all_block = Rule { profiles: NET_FW_PROFILE2_DOMAIN.0 | NET_FW_PROFILE2_PRIVATE.0 | NET_FW_PROFILE2_PUBLIC.0, allow: false };
+            assert!(decide(&[private_allow], NET_FW_PROFILE2_PRIVATE));
+            assert!(!decide(&[private_allow], NET_FW_PROFILE2_PUBLIC));
+            assert!(!decide(&[private_allow, all_block], NET_FW_PROFILE2_PRIVATE));
+            assert!(!decide(&[], NET_FW_PROFILE2_PRIVATE));
+        }
+
+        /// Reads this PC's real firewall rules: `FMP_FIREWALL_EXE=<path to freemonplay-host.exe>
+        /// cargo test -- --ignored --nocapture firewall`.
+        #[test]
+        #[ignore]
+        fn reads_this_pcs_rules() {
+            let exe = std::env::var("FMP_FIREWALL_EXE").expect("set FMP_FIREWALL_EXE");
+            println!("screens allowed through the firewall: {:?}", allows(Path::new(&exe)));
+        }
+
+        #[test]
+        fn expands_environment_variables() {
+            // SAFETY: a test-only variable, set before it's read.
+            unsafe { std::env::set_var("FMP_TEST_DIR", r"C:\Apps") };
+            assert_eq!(expand(r"%FMP_TEST_DIR%\x.exe"), r"C:\Apps\x.exe");
+            assert_eq!(expand("no vars"), "no vars");
+        }
+    }
 }
 
 /// `--allow-firewall` (as administrator): lets screens connect to this program on any

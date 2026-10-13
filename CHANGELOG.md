@@ -6,6 +6,11 @@ publishes it as the release notes.
 
 ## [Unreleased]
 
+### Fixed
+- **Windows host: the setup guide's firewall check** now reads Windows Firewall's rules
+  for the network the PC is on, so a rule made by accepting Windows' own "allow access"
+  prompt counts, and a blocking rule or "block all incoming connections" is noticed.
+
 ## [0.3.0] - 2026-10-12
 
 Hosts and screens must both be updated: the protocol changed (version 11).
