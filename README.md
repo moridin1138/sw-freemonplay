@@ -164,16 +164,24 @@ One QUIC connection per screen: the host captures its virtual display, hardware 
 - **Linux hosts** aren't implemented yet (see `crates/host/src/platform/unsupported.rs` for the plan).
 - **Touch** maps to a single-finger mouse. Multi-touch gestures aren't forwarded.
 
-## Code signing policy
+## Security warnings when installing
 
-Windows releases: free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). Mac releases are signed with the maintainer's Apple Developer ID and notarized by Apple.
+Freemonplay is free and open source, made by one developer, and its downloads aren't signed with a paid certificate (Apple charges US$99 a year, and Windows signing about US$120 a year). So macOS and Windows can't tell who made them, and warn you the first time. That doesn't mean anything is wrong with the app, but here's what to expect and how to check what you're running.
 
-- Only the programs built from this repository's source by its GitHub Actions workflows are signed, and each release's signing is approved by hand.
-- The Windows host installer also contains the [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT licensed), unchanged and with its own signature.
-- Team: committers and reviewers: [moridin1138](https://github.com/moridin1138). Approvers: [moridin1138](https://github.com/moridin1138).
-- Privacy: Freemonplay talks only to the computers you connect it to on your own network (and announces itself there, so they can find it). It doesn't transfer any information to other networked systems unless you ask it to, such as opening the download page from the setup window. See the [privacy policy](PRIVACY.md).
+**Mac:** opening the app the first time shows "Apple could not verify…". Choose Done, then go to System Settings > Privacy & Security, scroll down, choose **Open Anyway** next to Freemonplay, and confirm. You do this once per download. Because the apps aren't signed by Apple, macOS also asks again for Screen Recording and Accessibility after each update.
 
-How releases are signed is described in [SIGNING.md](SIGNING.md).
+**Windows:** SmartScreen may show "Windows protected your PC". Choose **More info**, then **Run anyway**. On PCs with **Smart App Control** turned on (Windows Security > App & browser control), Windows blocks unsigned apps outright and offers no way to run them. Turning Smart App Control off is possible, but Windows only lets you turn it back on by resetting or reinstalling Windows, so decide that for yourself.
+
+**Linux:** no warnings.
+
+**How to know what you're getting:**
+
+- Every download on the [releases page](https://github.com/moridin1138/sw-freemonplay/releases) is built by this repository's GitHub Actions workflows from the public source code of that release, not on anyone's own computer. GitHub shows each file's SHA-256 checksum on the releases page, so you can check that your download matches.
+- You can read every line of the source here, and [build the apps yourself](#build) if you'd rather.
+- The Windows host installer also contains the [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT licensed), unchanged and still signed by its own publisher.
+- Freemonplay talks only to the computers you connect it to on your own network (and announces itself there, so they can find it). It doesn't send information anywhere else unless you ask it to, such as opening the download page from the setup window. See the [privacy policy](PRIVACY.md).
+
+Signing may come later if the project grows enough to cover the cost; the release workflows are ready for it ([SIGNING.md](SIGNING.md)).
 
 ## License
 

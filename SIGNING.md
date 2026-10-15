@@ -1,5 +1,12 @@
 # Signing releases
 
+**Status (October 2026):** releases are unsigned. The SignPath Foundation declined the
+application, and paid signing (Apple's US$99 a year; Microsoft Artifact Signing, about
+US$10 a month) waits until the project can justify it. The README's "Security warnings when
+installing" section tells users what to expect meanwhile. The workflows below stay ready:
+they sign as soon as the secrets exist (the SignPath steps would become Artifact Signing
+steps if that's the route taken).
+
 Unsigned builds work, but Windows (SmartScreen, Smart App Control) and macOS (Gatekeeper)
 warn about them or block them, and a Mac asks for Screen Recording and Accessibility again
 after every update. Releases are signed in CI once the accounts below exist. Until then the

@@ -10,7 +10,7 @@ Roughly in priority order. Done items move to [CHANGELOG.md](CHANGELOG.md).
 
 - **Windows host.** Extends the desktop onto virtual monitors from the Virtual Display Driver (signed by SignPath; installed with `--install-display-driver`), hardware encoded with zero copy; tested Surface to MacBook Air. Learned the hard way: that driver can't be reconfigured while running (its reload command blocks its only control thread when monitors exist), so the installer fixes 3 monitors and a resolution list, and Windows rejects monitors offering too many modes (keep one global refresh rate). Next:
   - **Test the installer on a clean PC.** The CI-built installer was tested on the Surface (2026-10-12): silent install as administrator put the driver, firewall rule and sign-in entry in place, the tray app started from Program Files, and uninstalling quit it and removed all of them. Still to try on a PC that never had the driver, with the normal (non-silent) installer.
-  - **Our own SudoVDA-based driver**, signed via SignPath, for true per-client monitors with stable identities (no fixed count or resolution list).
+  - **Our own SudoVDA-based driver** for true per-client monitors (needs driver signing, which Microsoft only grants through its hardware program with an EV certificate, so it depends on signing being sorted out first) with stable identities (no fixed count or resolution list).
   - **Test keyboard and mouse mode with Windows as the host** (built: low-level hooks, cursor parked and hidden while a screen has control). Both layouts, the escape shortcut, and a key held while crossing. Low-level hooks don't see input meant for programs running as administrator.
 
 ## Next
@@ -30,6 +30,6 @@ Roughly in priority order. Done items move to [CHANGELOG.md](CHANGELOG.md).
 
 ## Distribution
 
-- **Signing: accounts.** The workflows are ready (see SIGNING.md) and skip signing until the accounts exist: apply to the SignPath Foundation (Windows; also needed for Smart App Control, which blocked an unsigned host build on the Surface), and join the Apple Developer Program (US$99 a year) for Developer ID signing and notarization. Then test a tagged release end to end.
+- **Signing, on hold** (SignPath declined, October 2026; see SIGNING.md). Free options worth doing first: sign Mac releases with one self-made certificate kept in CI, so Screen Recording and Accessibility survive updates (Gatekeeper still warns); and publish the Windows screen app through the Microsoft Store (free registration, free signing of MSIX packages; the host can't go there, it installs a driver). Paid, when it's worth it: Apple Developer Program (US$99 a year), Microsoft Artifact Signing (about US$10 a month, open to individuals in Canada). Reapplying to SignPath after more releases is also possible.
 - **Sign the Windows uninstallers** (Inno Setup's `SignedUninstaller` plus one more signing step).
 - A disk image background with an arrow, if wanted (needs Finder layout, awkward on CI).
