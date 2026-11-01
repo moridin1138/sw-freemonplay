@@ -447,11 +447,17 @@ async fn handle(incoming: quinn::Incoming, ctx: Arc<Ctx>) -> Result<()> {
     ctx.kvm.unregister(session.id());
     ctx.clipboard.unregister(session.id());
 
+    // Close the frame queue first: when the network was behind, the encoder may be
+    // waiting for room in it, and would never notice the slot closing. Waiting for it
+    // then hung this cleanup, which left the display plugged in for good (and a
+    // reconnect was refused, since macOS won't make a second display with its serial).
+    drop(rx);
     slot.close();
-    match encoder.join() {
-        Ok(Err(e)) => tracing::error!("encoder failed: {e:#}"),
-        Err(_) => tracing::error!("encoder thread panicked"),
-        Ok(Ok(())) => {}
+    // On a blocking thread: encoding the last frame can take a moment.
+    match tokio::task::spawn_blocking(move || encoder.join()).await {
+        Ok(Ok(Err(e))) => tracing::error!("encoder failed: {e:#}"),
+        Ok(Err(_)) | Err(_) => tracing::error!("encoder thread panicked"),
+        Ok(Ok(Ok(()))) => {}
     }
     tracing::debug!("{who}: encoder stopped");
     // Stop capture before unplugging the display it captures.

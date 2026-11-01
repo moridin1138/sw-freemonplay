@@ -21,6 +21,11 @@ Hosts and screens must both be updated: the protocol changed (version 12).
   the Mac apps' local network prompt.
 
 ### Fixed
+- **A screen that dropped off a busy connection stayed plugged into the host.** If the
+  network was behind when a screen stopped answering, the host never finished closing the
+  session: its virtual display stayed connected (windows on it out of reach), and the
+  screen's reconnect was refused with "CGVirtualDisplay refused the descriptor". The host
+  now closes the session promptly and keeps the display for a quick reconnect as intended.
 - **Windows: "VCRUNTIME140.dll was not found" on a fresh PC.** The programs now include the
   Visual C++ runtime, so they start without Microsoft's Visual C++ Redistributable.
 - **Windows host: the setup guide's firewall check** now reads Windows Firewall's rules
