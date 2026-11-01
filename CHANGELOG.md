@@ -6,6 +6,8 @@ publishes it as the release notes.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-01
+
 Hosts and screens must both be updated: the protocol changed (version 12).
 
 ### Added
@@ -208,7 +210,8 @@ First release.
 - App icon and menu bar icon; local signing identity so permissions survive rebuilds.
 - GPL-3.0-or-later license, CI for all three OSes, release builds for `v*` tags.
 
-[Unreleased]: https://github.com/moridin1138/sw-freemonplay/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/moridin1138/sw-freemonplay/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/moridin1138/sw-freemonplay/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/moridin1138/sw-freemonplay/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/moridin1138/sw-freemonplay/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/moridin1138/sw-freemonplay/releases/tag/v0.1.0
