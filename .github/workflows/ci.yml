@@ -100,6 +100,16 @@ jobs:
         run: cargo test --workspace --locked
       - name: Build
         run: cargo build --release --locked -p freemonplay-screen -p freemonplay-host
+      - name: Check the programs run without the Visual C++ runtime
+        shell: pwsh
+        run: |
+          # .cargo/config.toml builds the C runtime in; a fresh PC has no VCRUNTIME140.dll.
+          foreach ($exe in 'target/release/freemonplay-host.exe', 'target/release/freemonplay-screen.exe') {
+            $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($exe))
+            foreach ($dll in 'VCRUNTIME140', 'MSVCP140', 'api-ms-win-crt-') {
+              if ($text -match $dll) { throw "$exe needs $dll, which a fresh PC may not have" }
+            }
+          }
       - name: Upload the programs for signing
         if: env.SIGN == 'true'
         id: unsigned-exes

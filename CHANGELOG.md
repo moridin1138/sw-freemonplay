@@ -21,6 +21,8 @@ Hosts and screens must both be updated: the protocol changed (version 12).
   the Mac apps' local network prompt.
 
 ### Fixed
+- **Windows: "VCRUNTIME140.dll was not found" on a fresh PC.** The programs now include the
+  Visual C++ runtime, so they start without Microsoft's Visual C++ Redistributable.
 - **Windows host: the setup guide's firewall check** now reads Windows Firewall's rules
   for the network the PC is on, so a rule made by accepting Windows' own "allow access"
   prompt counts, and a blocking rule or "block all incoming connections" is noticed.

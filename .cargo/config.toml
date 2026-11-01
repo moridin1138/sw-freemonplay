@@ -6,3 +6,8 @@ CXXSTDLIB_x86_64_pc_windows_gnu = "static=stdc++"
 
 [target.x86_64-pc-windows-gnu]
 rustflags = ["-C", "link-arg=-static", "-L", "native=/opt/homebrew/opt/mingw-w64/toolchain-x86_64/x86_64-w64-mingw32/lib"]
+
+# Windows (MSVC, as CI builds it): build the C runtime into the .exe, so it starts on a
+# fresh PC that doesn't have the Visual C++ Redistributable (VCRUNTIME140.dll).
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
