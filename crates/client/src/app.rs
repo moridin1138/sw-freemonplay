@@ -17,7 +17,9 @@ use rust_i18n::t;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
+#[cfg(not(target_os = "ios"))]
+use winit::dpi::LogicalSize;
+use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
@@ -36,6 +38,7 @@ use crate::kvm;
 use crate::ui::{self, Action, HostRow, MonitorRow, Options, Role, Screen};
 use crate::{CodecArg, Scale};
 
+#[cfg(not(target_os = "ios"))]
 const PICKER_SIZE: LogicalSize<f64> = LogicalSize::new(560.0, 500.0);
 const DEFAULT_WINDOWED: (u32, u32) = (1280, 800);
 /// The pointer this close to the top edge (points) shows the toolbar.
@@ -195,6 +198,10 @@ pub struct App {
     /// in our windows too, and mustn't be sent back.
     host_in_control: Arc<AtomicBool>,
     pub exit_error: Option<String>,
+    #[cfg(target_os = "ios")]
+    active: bool,
+    #[cfg(target_os = "ios")]
+    toolbar_touches: std::collections::HashSet<u64>,
 }
 
 impl App {
@@ -242,6 +249,10 @@ impl App {
             logo: None,
             host_in_control: Arc::default(),
             exit_error: None,
+            #[cfg(target_os = "ios")]
+            active: false,
+            #[cfg(target_os = "ios")]
+            toolbar_touches: Default::default(),
         }
     }
 
@@ -264,7 +275,9 @@ impl App {
     }
 
     fn open_window(&mut self, event_loop: &ActiveEventLoop) -> anyhow::Result<()> {
-        let mut attrs = Window::default_attributes().with_title("Freemonplay Screen").with_inner_size(PICKER_SIZE);
+        let mut attrs = Window::default_attributes().with_title("Freemonplay Screen");
+        #[cfg(not(target_os = "ios"))]
+        { attrs = attrs.with_inner_size(PICKER_SIZE); }
         if let Some(i) = self.startup.monitor {
             let monitor = event_loop.available_monitors().nth(i);
             match monitor {
@@ -280,7 +293,15 @@ impl App {
         if let Some((w, h, rgba)) = ui::icon_rgba() {
             attrs = attrs.with_window_icon(winit::window::Icon::from_rgba(rgba, w, h).ok());
         }
+        #[cfg(target_os = "ios")]
+        { attrs = attrs.with_fullscreen(Some(Fullscreen::Borderless(None))); }
         let window = Arc::new(event_loop.create_window(attrs)?);
+        #[cfg(target_os = "ios")]
+        {
+            use winit::platform::ios::{ValidOrientations, WindowExtIOS};
+            window.set_valid_orientations(ValidOrientations::LandscapeAndPortrait);
+            window.set_prefers_status_bar_hidden(true);
+        }
         let renderer = Renderer::new(window.clone(), self.options.vsync)?;
         self.logo = ui::load_logo(&self.egui_ctx);
         self.egui_state = Some(egui_winit::State::new(
@@ -510,6 +531,8 @@ impl App {
     }
 
     fn on_connected(&mut self, event_loop: &ActiveEventLoop, view: usize, host_name: String, width: u32, height: u32, codec: Codec) {
+        #[cfg(target_os = "ios")]
+        if self.displays.get(&view).is_none_or(|d| d.live.is_none()) { return; }
         let fullscreen = self.options.fullscreen;
         let windowed = self.startup.windowed.unwrap_or(DEFAULT_WINDOWED);
         if view == MAIN
@@ -762,9 +785,11 @@ impl App {
         main.video = None;
         main.renderer.clear_video();
         let w = &main.window;
+        #[cfg(not(target_os = "ios"))]
         w.set_fullscreen(None);
         w.set_cursor_visible(true);
         w.set_title("Freemonplay Screen");
+        #[cfg(not(target_os = "ios"))]
         let _ = w.request_inner_size(PICKER_SIZE);
         // The other monitors end with the main one.
         self.close_extras();
@@ -870,6 +895,12 @@ impl App {
     /// main display.
     fn draw_stream(&mut self, view: usize) {
         let now = Instant::now();
+        #[cfg(target_os = "ios")]
+        {
+            if !self.active { return; }
+            self.toolbar.shown = true;
+            self.toolbar.hide_at = None;
+        }
         if self.toolbar.hide_at.is_some_and(|t| now >= t) {
             self.toolbar = ToolbarState::default();
         }
@@ -963,6 +994,26 @@ impl App {
         }
         let Some(main) = self.displays.get(&MAIN) else { return false };
         let window = main.window.clone();
+        #[cfg(target_os = "ios")]
+        if let WindowEvent::Touch(touch) = event {
+            let scale = window.scale_factor();
+            let point = egui::pos2((touch.location.x / scale) as f32, (touch.location.y / scale) as f32);
+            if touch.phase == winit::event::TouchPhase::Started
+                && self.toolbar.rect.is_some_and(|r| r.expand(12.0).contains(point))
+            {
+                self.toolbar_touches.insert(touch.id);
+            }
+            if self.toolbar_touches.contains(&touch.id) {
+                if let Some(state) = self.egui_state.as_mut() {
+                    let _ = state.on_window_event(&window, event);
+                    window.request_redraw();
+                }
+                if matches!(touch.phase, winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled) {
+                    self.toolbar_touches.remove(&touch.id);
+                }
+                return true;
+            }
+        }
         match event {
             WindowEvent::CursorMoved { position, .. } => {
                 let scale = window.scale_factor();
@@ -1115,7 +1166,23 @@ impl App {
 }
 
 impl ApplicationHandler<UserEvent> for App {
+    #[cfg(target_os = "ios")]
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        self.active = false;
+        self.toolbar_touches.clear();
+        // iPad cannot keep drawing or streaming while the app is in the background.
+        self.disconnect();
+        for display in self.displays.values_mut() {
+            if let Some(task) = display.task.take() { task.abort(); }
+            display.live = None;
+        }
+        self.leave_stream();
+        self.screen = Screen::Hosts;
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "ios")]
+        { self.active = true; }
         if self.main().is_none()
             && let Err(e) = self.open_window(event_loop)
         {
@@ -1125,6 +1192,8 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
+        #[cfg(target_os = "ios")]
+        if !self.active { return; }
         match event {
             UserEvent::HostsChanged => {
                 if matches!(self.screen, Screen::Hosts) {
@@ -1175,6 +1244,8 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::RedrawRequested => {
+                #[cfg(target_os = "ios")]
+                if !self.active { return; }
                 if self.streaming() || view != MAIN { self.draw_stream(view) } else { self.draw_ui() }
                 return;
             }

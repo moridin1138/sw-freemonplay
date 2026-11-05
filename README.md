@@ -25,6 +25,10 @@ See [CHANGELOG.md](CHANGELOG.md) for what's new, [ARCHITECTURE.md](ARCHITECTURE.
 
 Tested end to end: a Mac host (macOS 15, M4) streaming to Mac and Windows clients over Wi-Fi. `freemonplay-screen --self-test` checks a machine's decoder and GPU path without a window.
 
+An **iPad screen preview** is also available from source (iPadOS 16+, portrait and landscape). It
+connects by address to the existing Mac and Windows hosts. See [the iPad build notes](build/ios/README.md).
+Device installation and end-to-end streaming still need testing.
+
 ## Build
 
 Requires Rust (`brew install rustup && rustup default stable`) and, on macOS, the Xcode Command Line Tools. Full Xcode isn't needed.
@@ -151,6 +155,9 @@ Both apps follow the computer's language: English, German, Spanish, French, Turk
 One QUIC connection per screen: the host captures its virtual display, hardware encodes it (H.264 or HEVC, negotiated) and streams it; the client decodes with the OS's decoder, draws it with wgpu and sends input back. Pairing uses SPAKE2 with the host's 6 digit code, after which the client reconnects with a token. Frames are skipped rather than queued whenever anything falls behind, so the picture never lags. Details, including threads, zero copy, several monitors and the protocol, are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Known limitations and next steps
+
+- **iPad preview:** manual host address, one screen, no clipboard sharing or
+  keyboard and mouse mode. Leaving the app disconnects the session. No signed download yet.
 
 - **Hardware encoding is macOS only.** On a Mac, captured frames go straight from ScreenCaptureKit into the hardware encoder with no copy (VideoToolbox's low-latency mode, Constrained High profile). Other hosts would fall back to OpenH264, which is CPU-hungry above 1440p.
 - **Clients decode with the OS's decoder**: VideoToolbox on macOS, Media Foundation with DXVA on Windows, GStreamer (VAAPI where available) on Linux.

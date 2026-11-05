@@ -180,6 +180,13 @@ pub fn style(ctx: &egui::Context) {
         s.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, AMBER.linear_multiply(0.7));
         s.spacing.item_spacing = vec2(8.0, 8.0);
         s.spacing.button_padding = vec2(14.0, 7.0);
+        if cfg!(target_os = "ios") {
+            s.spacing.interact_size.y = 48.0;
+            s.spacing.button_padding = vec2(20.0, 12.0);
+            s.spacing.item_spacing = vec2(12.0, 14.0);
+            s.text_styles.insert(egui::TextStyle::Body, egui::FontId::proportional(17.0));
+            s.text_styles.insert(egui::TextStyle::Button, egui::FontId::proportional(17.0));
+        }
     });
 }
 
@@ -232,12 +239,15 @@ pub fn toolbar(ctx: &egui::Context, bar: &Toolbar) -> (Option<ToolbarAction>, eg
                 ui.horizontal(|ui| {
                     screen_glyph(ui, AMBER);
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(bar.host).strong());
-                        ui.label(RichText::new(bar.detail).small().color(MUTED));
+                        if cfg!(target_os = "ios") {
+                            ui.set_width((ui.ctx().content_rect().width() - 230.0).clamp(60.0, 360.0));
+                        }
+                        ui.add(egui::Label::new(RichText::new(bar.host).strong()).truncate());
+                        ui.add(egui::Label::new(RichText::new(bar.detail).small().color(MUTED)).truncate());
                     });
                     ui.add_space(16.0);
                     let label = if bar.fullscreen { t!("screen.toolbar.exit_fullscreen") } else { t!("screen.toolbar.fullscreen") };
-                    if ui.add(egui::Button::new(label).min_size(vec2(96.0, 32.0))).clicked() {
+                    if !cfg!(target_os = "ios") && ui.add(egui::Button::new(label).min_size(vec2(96.0, 32.0))).clicked() {
                         action = Some(ToolbarAction::ToggleFullscreen);
                     }
                     if primary(ui, &t!("screen.disconnect"), true) {
@@ -306,6 +316,9 @@ pub struct View<'a> {
 }
 
 pub fn draw(ui: &mut egui::Ui, view: View<'_>) -> Option<Action> {
+    if cfg!(target_os = "ios") {
+        return draw_ipad(ui, view);
+    }
     let mut action = None;
     egui::CentralPanel::default()
         .frame(egui::Frame::new().fill(GRAPHITE).inner_margin(egui::Margin::symmetric(28, 24)))
@@ -324,6 +337,68 @@ pub fn draw(ui: &mut egui::Ui, view: View<'_>) -> Option<Action> {
                     Screen::Streaming => None,
                     Screen::Remote { host } => remote(ui, host),
                 };
+            });
+        });
+    action
+}
+
+/// A bounded reading width keeps the connection controls together on large iPads.
+/// Scroll rather than compress when the keyboard leaves little vertical space.
+fn draw_ipad(ui: &mut egui::Ui, view: View<'_>) -> Option<Action> {
+    let mut action = None;
+    egui::CentralPanel::default()
+        .frame(egui::Frame::new().fill(GRAPHITE).inner_margin(egui::Margin::same(24)))
+        .show(ui, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                let width = ui.available_width().min(600.0);
+                let inset = ((ui.available_width() - width) * 0.5).max(0.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(inset);
+                    ui.vertical(|ui| {
+                        ui.set_width(width);
+                        ui.add_space(if ui.available_height() > 650.0 { 64.0 } else { 12.0 });
+                        header(ui, view.logo);
+                        ui.add_space(28.0);
+                        if let Some(message) = view.message {
+                            notice(ui, message);
+                            ui.add_space(12.0);
+                        }
+                        action = match view.screen {
+                            Screen::Hosts => {
+                                card(ui, |ui| {
+                                    section(ui, &t!("screen.hosts.title"));
+                                    ui.label(RichText::new(t!("screen.ipad.address_help")).color(MUTED));
+                                    ui.add_space(10.0);
+                                    let field = ui.add_sized([ui.available_width(), 52.0],
+                                        egui::TextEdit::singleline(view.address)
+                                            .hint_text(t!("screen.hosts.address_hint"))
+                                            .margin(vec2(14.0, 14.0)));
+                                    let enter = field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                                    let ready = !view.address.trim().is_empty();
+                                    let button = egui::Button::new(RichText::new(t!("screen.connect")).strong().color(GRAPHITE))
+                                        .fill(AMBER).min_size(vec2(ui.available_width(), 52.0));
+                                    if (ui.add_enabled(ready, button).clicked() || enter) && ready {
+                                        action = Some(Action::ConnectAddress(view.address.trim().to_string()));
+                                    }
+                                });
+                                ui.add_space(18.0);
+                                card(ui, |ui| {
+                                    egui::CollapsingHeader::new(t!("screen.options.title"))
+                                        .id_salt("ipad_options").show(ui, |ui| options_panel(ui, view.options));
+                                });
+                                ui.add_space(14.0);
+                                ui.label(RichText::new(t!("screen.ipad.disconnect_help")).color(MUTED));
+                                ui.label(RichText::new(format!("Freemonplay Screen {}", env!("CARGO_PKG_VERSION"))).small().color(MUTED));
+                                action.take()
+                            }
+                            Screen::Code { target, code, error, .. } => code_dialog(ui, &target.name, code, error.as_deref()),
+                            Screen::Connecting { to } => connecting(ui, to),
+                            Screen::Streaming => None,
+                            Screen::Remote { host } => remote(ui, host),
+                        };
+                        ui.add_space(32.0);
+                    });
+                });
             });
         });
     action
@@ -379,7 +454,7 @@ fn section(ui: &mut egui::Ui, title: &str) {
 fn primary(ui: &mut egui::Ui, text: &str, enabled: bool) -> bool {
     let button = egui::Button::new(RichText::new(text).strong().color(GRAPHITE))
         .fill(if enabled { AMBER } else { AMBER.linear_multiply(0.35) })
-        .min_size(vec2(96.0, 32.0));
+        .min_size(vec2(96.0, if cfg!(target_os = "ios") { 48.0 } else { 32.0 }));
     ui.add_enabled(enabled, button).clicked()
 }
 
@@ -406,7 +481,9 @@ fn hosts(
     let mut action = None;
     section(ui, &t!("screen.hosts.title"));
     card(ui, |ui| {
-        if hosts.is_empty() {
+        if cfg!(target_os = "ios") {
+            ui.label(t!("screen.ipad.address_help"));
+        } else if hosts.is_empty() {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.spinner();
@@ -443,7 +520,7 @@ fn hosts(
     monitor_roles(ui, monitors, kvm_supported, options);
 
     ui.add_space(6.0);
-    egui::CollapsingHeader::new(t!("screen.hosts.by_address")).id_salt("by_address").show(ui, |ui| {
+    egui::CollapsingHeader::new(t!("screen.hosts.by_address")).id_salt("by_address").default_open(cfg!(target_os = "ios")).show(ui, |ui| {
         ui.horizontal(|ui| {
             let field = ui.add(
                 egui::TextEdit::singleline(address)
@@ -461,7 +538,9 @@ fn hosts(
     egui::CollapsingHeader::new(t!("screen.options.title")).id_salt("options").show(ui, |ui| options_panel(ui, options));
 
     ui.add_space(10.0);
-    let help = if options.toolbar {
+    let help = if cfg!(target_os = "ios") {
+        t!("screen.ipad.disconnect_help")
+    } else if options.toolbar {
         t!("screen.hosts.disconnect_help_toolbar", keys = shortcut('D'))
     } else {
         t!("screen.hosts.disconnect_help", keys = shortcut('D'))
@@ -469,7 +548,7 @@ fn hosts(
     ui.label(RichText::new(help).color(MUTED).small());
     ui.horizontal(|ui| {
         ui.label(RichText::new(format!("Freemonplay Screen {}", env!("CARGO_PKG_VERSION"))).color(MUTED.linear_multiply(0.7)).small());
-        if ui.link(RichText::new(t!("screen.show_log")).small()).clicked() {
+        if !cfg!(target_os = "ios") && ui.link(RichText::new(t!("screen.show_log")).small()).clicked() {
             action = Some(Action::ShowLog);
         }
     });
@@ -530,7 +609,9 @@ fn monitor_roles(ui: &mut egui::Ui, monitors: &[MonitorRow], kvm_supported: bool
 }
 
 fn options_panel(ui: &mut egui::Ui, options: &mut Options) {
-    ui.checkbox(&mut options.fullscreen, t!("screen.options.fullscreen"));
+    if !cfg!(target_os = "ios") {
+        ui.checkbox(&mut options.fullscreen, t!("screen.options.fullscreen"));
+    }
     egui::Grid::new("options").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
         let scale_label = |scale: Scale| match scale {
             Scale::Auto => t!("screen.options.automatic"),
@@ -558,8 +639,10 @@ fn options_panel(ui: &mut egui::Ui, options: &mut Options) {
         ui.end_row();
     });
     ui.checkbox(&mut options.keep_awake, t!("screen.options.keep_awake"));
-    ui.checkbox(&mut options.share_clipboard, t!("screen.options.clipboard")).on_hover_text(t!("screen.options.clipboard_help"));
-    ui.checkbox(&mut options.toolbar, t!("screen.options.toolbar")).on_hover_text(t!("screen.options.toolbar_help"));
+    if !cfg!(target_os = "ios") {
+        ui.checkbox(&mut options.share_clipboard, t!("screen.options.clipboard")).on_hover_text(t!("screen.options.clipboard_help"));
+        ui.checkbox(&mut options.toolbar, t!("screen.options.toolbar")).on_hover_text(t!("screen.options.toolbar_help"));
+    }
     ui.checkbox(&mut options.vsync, t!("screen.options.vsync")).on_hover_text(t!("screen.options.vsync_help"));
 }
 

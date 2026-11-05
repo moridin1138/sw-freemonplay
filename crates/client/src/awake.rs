@@ -148,7 +148,7 @@ mod imp {
     }
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux", target_os = "ios")))]
 mod imp {
     use anyhow::{Result, bail};
 
@@ -157,6 +157,33 @@ mod imp {
     impl Inner {
         pub fn start(_reason: &str) -> Result<Self> {
             bail!("not supported on this OS")
+        }
+    }
+}
+
+#[cfg(target_os = "ios")]
+mod imp {
+    use anyhow::{Context, Result};
+    use objc2::MainThreadMarker;
+    use objc2_ui_kit::UIApplication;
+
+    pub struct Inner { previous: bool }
+
+    impl Inner {
+        pub fn start(_reason: &str) -> Result<Self> {
+            let mtm = MainThreadMarker::new().context("idle timer needs the UI thread")?;
+            let app = UIApplication::sharedApplication(mtm);
+            let previous = app.isIdleTimerDisabled();
+            app.setIdleTimerDisabled(true);
+            Ok(Self { previous })
+        }
+    }
+
+    impl Drop for Inner {
+        fn drop(&mut self) {
+            if let Some(mtm) = MainThreadMarker::new() {
+                UIApplication::sharedApplication(mtm).setIdleTimerDisabled(self.previous);
+            }
         }
     }
 }

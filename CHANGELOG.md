@@ -6,6 +6,16 @@ publishes it as the release notes.
 
 ## [Unreleased]
 
+### Changed
+- **iPad layout:** larger touch controls, a centered connection panel that scrolls with
+  the keyboard, and support for portrait and landscape. Rotating fits the streamed
+  picture to the screen while keeping the host display resolution.
+
+### Added
+- **iPad screen preview:** an iPadOS 16+ app built from the shared screen client, with
+  connection by address, pairing, VideoToolbox decoding, Metal display and touch input.
+  Automatic discovery, clipboard sharing and device signing are still to do.
+
 ## [0.4.0] - 2026-11-01
 
 Hosts and screens must both be updated: the protocol changed (version 12).

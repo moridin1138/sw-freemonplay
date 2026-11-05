@@ -199,3 +199,8 @@ host.net.tip_awdl: "AirDrop, Handoff oder die universelle Steuerung können Verz
 # The Mac apps' system prompts (bundle.sh puts these in each app's InfoPlist.strings)
 host.plist.local_network: "Freemonplay Host findet Bildschirme im lokalen Netzwerk und überträgt an sie."
 screen.plist.local_network: "Freemonplay Screen findet im lokalen Netzwerk Computer, für die es als Bildschirm dient."
+
+# iPad preview
+screen.ipad.address_help: "Gib die IP-Adresse des Host-Computers ein. Die automatische Suche ist auf dem iPad noch nicht verfügbar."
+screen.ipad.disconnect_help: "Tippe oben in der Leiste auf Trennen, um die Verbindung zu beenden."
+screen.plist.local_network_ipad: "Verbinde dich mit einem Freemonplay-Host im lokalen Netzwerk, um dieses iPad als zusätzlichen Bildschirm zu nutzen."

@@ -199,3 +199,8 @@ host.net.tip_awdl: "隔空投送、接力或通用控制可能导致延迟；串
 # The Mac apps' system prompts (bundle.sh puts these in each app's InfoPlist.strings)
 host.plist.local_network: "Freemonplay Host 会在本地网络中查找屏幕并向其串流。"
 screen.plist.local_network: "Freemonplay Screen 会在本地网络中查找可为其充当屏幕的电脑。"
+
+# iPad preview
+screen.ipad.address_help: "输入主机的 IP 地址。iPad 暂不支持自动发现。"
+screen.ipad.disconnect_help: "轻点顶部栏中的断开连接以停止。"
+screen.plist.local_network_ipad: "连接到局域网中的 Freemonplay 主机，将此 iPad 用作额外屏幕。"

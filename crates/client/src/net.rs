@@ -1,5 +1,6 @@
 //! Finding hosts, connecting, and running the session once the window exists.
 
+#[cfg(not(target_os = "ios"))]
 use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex, mpsc as std_mpsc};
@@ -8,7 +9,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use fmp_proto::{
     ALPN, Auth, ClientMsg, Codec, DEFAULT_PORT, DisplayRequest, Hello, HostMsg, PROTOCOL_VERSION, RejectKind,
-    MAX_CLIPBOARD_IMAGE_BYTES, SERVICE_TYPE, ScreenId, VideoFrame, pairing,
+    MAX_CLIPBOARD_IMAGE_BYTES, ScreenId, VideoFrame, pairing,
     read_msg, write_msg,
 };
 use rust_i18n::t;
@@ -45,9 +46,10 @@ impl std::fmt::Display for Target {
 pub type HostList = Arc<Mutex<Vec<Target>>>;
 
 /// Browses mDNS continuously; `changed` is called whenever the list changes.
+#[cfg(not(target_os = "ios"))]
 pub fn browse(changed: impl Fn() + Send + 'static) -> Result<HostList> {
     let mdns = mdns_sd::ServiceDaemon::new()?;
-    let rx = mdns.browse(SERVICE_TYPE)?;
+    let rx = mdns.browse(fmp_proto::SERVICE_TYPE)?;
     let list: HostList = Arc::default();
     let shared = list.clone();
     std::thread::Builder::new().name("discovery".into()).spawn(move || {
@@ -89,6 +91,7 @@ pub fn browse(changed: impl Fn() + Send + 'static) -> Result<HostList> {
 
 /// Drops addresses another machine can't use (loopback, IPv6 link-local without a scope
 /// id) and orders the rest: private IPv4 first, then other IPv4, then IPv6.
+#[cfg(any(not(target_os = "ios"), test))]
 fn rank_addresses(ips: Vec<IpAddr>, port: u16) -> Vec<SocketAddr> {
     let mut ips: Vec<IpAddr> = ips
         .into_iter()
@@ -627,4 +630,10 @@ mod tests {
         let ranked: Vec<String> = rank_addresses(ips, 47800).iter().map(SocketAddr::to_string).collect();
         assert_eq!(ranked, ["192.168.0.25:47800", "100.64.1.2:47800", "169.254.3.4:47800", "[2001:db8::5]:47800"]);
     }
+}
+
+/// Direct connections work without the raw multicast entitlement on iPad.
+#[cfg(target_os = "ios")]
+pub fn browse(_changed: impl Fn() + Send + 'static) -> Result<HostList> {
+    Ok(Arc::default())
 }

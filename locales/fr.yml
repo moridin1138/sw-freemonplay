@@ -199,3 +199,8 @@ host.net.tip_awdl: "AirDrop, Handoff ou Contrôle universel peuvent causer des r
 # The Mac apps' system prompts (bundle.sh puts these in each app's InfoPlist.strings)
 host.plist.local_network: "Freemonplay Host trouve les écrans de votre réseau local et diffuse vers eux."
 screen.plist.local_network: "Freemonplay Screen trouve sur votre réseau local les ordinateurs dont il peut être l’écran."
+
+# iPad preview
+screen.ipad.address_help: "Saisissez l’adresse IP de l’ordinateur hôte. La recherche automatique n’est pas encore disponible sur iPad."
+screen.ipad.disconnect_help: "Touchez Déconnecter dans la barre du haut pour arrêter."
+screen.plist.local_network_ipad: "Connectez cet iPad à un hôte Freemonplay sur votre réseau local pour l’utiliser comme écran supplémentaire."

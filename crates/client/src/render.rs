@@ -105,7 +105,7 @@ pub struct Renderer {
     offscreen: Option<wgpu::Texture>,
     // The importers hold the raw GPU device, so they're declared (and dropped) before the
     // wgpu device: releasing it after wgpu has torn the device down crashes on Windows.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     metal: Option<crate::render_metal::MetalImport>,
     #[cfg(target_os = "windows")]
     d3d12: Option<crate::render_d3d12::D3d12Import>,
@@ -288,7 +288,7 @@ impl Renderer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         let metal = crate::render_metal::MetalImport::new(&device);
         #[cfg(target_os = "windows")]
         let d3d12 = crate::render_d3d12::D3d12Import::new(&device, &adapter);
@@ -308,7 +308,7 @@ impl Renderer {
             planes: None,
             placeholder,
             egui,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             metal,
             #[cfg(target_os = "windows")]
             d3d12,
@@ -348,7 +348,7 @@ impl Renderer {
             }
             return;
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         if let decode::Planes::Native(buffer) = &frame.planes {
             // Zero copy: draw straight from the decoder's buffer.
             if let Some(metal) = &self.metal {
@@ -387,7 +387,7 @@ impl Renderer {
                 self.write_plane(&planes.y, y, *y_stride, frame.width, frame.height);
                 self.write_plane(&planes.u, uv, *uv_stride, cw, ch);
             }
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             decode::Planes::Native(_) => unreachable!("handled above"),
             #[cfg(target_os = "windows")]
             decode::Planes::Shared(_) => unreachable!("handled above"),

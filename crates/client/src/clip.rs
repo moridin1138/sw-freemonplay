@@ -78,7 +78,7 @@ impl ClipSync {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 mod pixels {
     //! arboard hands images over as RGBA pixels; the protocol carries PNG.
     use std::borrow::Cow;
@@ -240,7 +240,7 @@ mod imp {
     }
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
 mod imp {
     //! X11 and Wayland have no change counter here, so the content itself is compared.
     use super::{Item, pixels};
@@ -266,4 +266,13 @@ mod imp {
             Item::Image(png) => pixels::write_image(png),
         }
     }
+}
+
+// iPad clipboard sharing requires a separate, user initiated paste flow.
+#[cfg(target_os = "ios")]
+mod imp {
+    use super::Item;
+    pub fn change_count() -> Option<u64> { None }
+    pub fn read() -> Option<Item> { None }
+    pub fn write(_item: &Item) {}
 }

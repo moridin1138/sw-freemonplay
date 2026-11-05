@@ -6,6 +6,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+crate-type = ["rlib", "staticlib"]
+
 [dependencies]
 png = "0.18"
 fmp-proto.workspace = true
@@ -14,7 +17,6 @@ rust-i18n.workspace = true
 sys-locale.workspace = true
 clap.workspace = true
 directories.workspace = true
-mdns-sd.workspace = true
 quinn.workspace = true
 rand.workspace = true
 rustls.workspace = true
@@ -30,14 +32,13 @@ wgpu = "30"
 winit = "0.30"
 egui = "0.36"
 egui-wgpu = "0.36"
-egui-winit = "0.36"
 
 # Each OS decodes with its own H.264 decoder (see src/decode). Linux keeps bundled
 # OpenH264 as a last resort for systems without GStreamer's H.264 plugins.
 [build-dependencies]
 winresource = "0.1"
 
-[target.'cfg(not(any(target_os = "macos", target_os = "windows")))'.dependencies]
+[target.'cfg(not(any(target_os = "macos", target_os = "windows", target_os = "ios")))'.dependencies]
 openh264.workspace = true
 arboard = { version = "3", default-features = false, features = ["image-data"] }
 
@@ -70,12 +71,22 @@ windows = { version = "0.62", features = [
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSDictionary", "NSProcessInfo", "NSString"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSBitmapImageRep", "NSImageRep"] }
 objc2-core-wlan = "0.3"
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSDictionary", "NSProcessInfo", "NSString"] }
 objc2-metal = "0.3"
 objc2-core-foundation = "0.3"
 objc2-core-media = "0.3"
 objc2-core-video = "0.3"
 objc2-video-toolbox = "0.3"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+egui-winit = { version = "0.36", default-features = false }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIApplication"] }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+mdns-sd.workspace = true
+egui-winit = "0.36"

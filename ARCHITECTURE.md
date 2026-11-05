@@ -56,6 +56,8 @@ crates/
                       running copy), kvm.rs (low-level hooks for keyboard and mouse mode)
     platform/unsupported.rs   stubs (and the plan) for the Linux host
   client/   freemonplay-screen: discovery, sessions, decoding, rendering, input, GUI
+    lib.rs            shared desktop/iPad startup; static library entry for the iPad app
+    main.rs           desktop executable entry
     app.rs            the app state machine and its windows ("displays")
     ui.rs             egui screens: host list, pairing code, connecting
     net.rs            discovery (mDNS), connecting, the session loop
@@ -327,3 +329,24 @@ refresh aren't included, so the real figure is somewhat higher.
   Developer ID signed and notarized (`build/macos/notarize.sh`; see SIGNING.md).
   `release.yml` publishes them for `v*` tags, with that version's
   changelog section as the notes.
+
+## iPad screen preview
+
+`build/ios/build.sh` wraps the client static library in an iPad app (iPadOS 16+).
+`main.m` calls `freemonplay_start` on the main thread; winit owns UIKit's event loop.
+The iPad uses the existing QUIC protocol, pairing store, VideoToolbox decoder and Metal
+texture import. Hosts need no protocol update. Local network prompt translations come
+from `screen.plist.local_network_ipad` in the locale files.
+
+Discovery returns an empty list on iPad for now: the desktop mDNS implementation uses raw
+multicast, which requires an additional Apple entitlement. Connection by address stays
+available. Clipboard polling and remote control of the iPad are disabled. A persistent
+stream toolbar accepts touches without sending those touches to the host. The app rotates
+to portrait or landscape and disconnects and stops drawing when UIKit suspends it. Device signing,
+Bonjour discovery and real-device streaming validation remain outstanding.
+
+The iPad connection UI uses a centered panel capped at 600 points with 48 point touch
+controls and vertical scrolling for short windows and the software keyboard. Both
+portrait orientations and both landscape orientations are declared in the app bundle.
+Rotation resizes the render surface and letterboxes the existing video; it does not
+renegotiate the host display. Pointer coordinates use the same letterbox mapping.

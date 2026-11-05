@@ -22,9 +22,9 @@ mod annexb;
 mod gstreamer;
 #[cfg(target_os = "windows")]
 pub mod mediafoundation;
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
 mod software;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod videotoolbox;
 
 /// A decoded 4:2:0 picture. Planes keep the decoder's row padding (strides in bytes).
@@ -40,12 +40,12 @@ pub struct YuvFrame {
 
 pub enum Planes {
     /// Separate U and V planes (the software decoder).
-    #[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
+    #[cfg_attr(any(target_os = "macos", target_os = "ios", target_os = "windows"), allow(dead_code))]
     I420 { y: Vec<u8>, u: Vec<u8>, v: Vec<u8>, y_stride: u32, uv_stride: u32 },
     /// One interleaved CbCr plane (what hardware decoders produce).
     Nv12 { y: Vec<u8>, uv: Vec<u8>, y_stride: u32, uv_stride: u32 },
     /// The decoder's own GPU-shareable NV12 buffer, drawn without copying (macOS).
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     Native(videotoolbox::PixelBuffer),
     /// An NV12 texture on the GPU shared with the renderer, drawn without copying (Windows).
     #[cfg(target_os = "windows")]
@@ -58,7 +58,7 @@ impl Planes {
         match self {
             Planes::I420 { .. } => "I420 in system memory",
             Planes::Nv12 { .. } => "NV12 in system memory",
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             Planes::Native(_) => "VideoToolbox GPU buffer",
             #[cfg(target_os = "windows")]
             Planes::Shared(_) => "shared Direct3D texture",
@@ -79,13 +79,13 @@ pub trait Decoder {
 /// Codecs this machine can decode, most preferred first. HEVC goes first only when the
 /// GPU decodes it; in software it costs more CPU than H.264 for no visible gain on a LAN.
 pub fn supported_codecs() -> Vec<Codec> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     return videotoolbox::supported_codecs();
     #[cfg(target_os = "windows")]
     return mediafoundation::supported_codecs();
     #[cfg(target_os = "linux")]
     return gstreamer::supported_codecs();
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows", target_os = "linux")))]
     return vec![Codec::H264];
 }
 
@@ -94,7 +94,7 @@ pub fn supported_codecs() -> Vec<Codec> {
 pub(crate) fn new_decoder(codec: Codec, deliver: Deliver, gpu_adapter: Option<u64>) -> Result<Box<dyn Decoder>> {
     #[cfg(not(target_os = "windows"))]
     let _ = gpu_adapter;
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     return Ok(Box::new(videotoolbox::VtDecoder::new(codec, deliver)));
     #[cfg(target_os = "windows")]
     return Ok(Box::new(mediafoundation::MfDecoder::new(codec, deliver, gpu_adapter)?));
@@ -107,7 +107,7 @@ pub(crate) fn new_decoder(codec: Codec, deliver: Deliver, gpu_adapter: Option<u6
         }
         Err(e) => Err(e),
     };
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows", target_os = "linux")))]
     return {
         anyhow::ensure!(codec == Codec::H264, "only H.264 is supported here");
         Ok(Box::new(software::SoftwareDecoder::new(deliver)?))
