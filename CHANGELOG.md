@@ -6,10 +6,15 @@ publishes it as the release notes.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-07
+
+This release keeps protocol 12. You can upgrade the host and screen separately.
+
 ### Changed
 - **One Freemonplay app on Mac and Windows:** install once, then choose Host or Screen.
-  The role icons show where the desktop picture goes. Return to the picker from either role. Windows offers driver and firewall setup
-  when you choose Host. Existing pairings carry over.
+  The role icons show where the desktop picture goes, and either role can return to the
+  picker. Windows offers driver and firewall setup when you choose Host. Existing
+  pairings carry over.
 - **iPad layout:** larger touch controls, a centered connection panel that scrolls with
   the keyboard, and support for portrait and landscape. Rotating fits the streamed
   picture to the screen while keeping the host display resolution.
@@ -225,7 +230,8 @@ First release.
 - App icon and menu bar icon; local signing identity so permissions survive rebuilds.
 - GPL-3.0-or-later license, CI for all three OSes, release builds for `v*` tags.
 
-[Unreleased]: https://github.com/moridin1138/sw-freemonplay/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/moridin1138/sw-freemonplay/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/moridin1138/sw-freemonplay/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/moridin1138/sw-freemonplay/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/moridin1138/sw-freemonplay/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/moridin1138/sw-freemonplay/compare/v0.1.0...v0.2.0
