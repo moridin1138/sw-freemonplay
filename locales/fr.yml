@@ -204,3 +204,13 @@ screen.plist.local_network: "Freemonplay Screen trouve sur votre réseau local l
 screen.ipad.address_help: "Saisissez l’adresse IP de l’ordinateur hôte. La recherche automatique n’est pas encore disponible sur iPad."
 screen.ipad.disconnect_help: "Touchez Déconnecter dans la barre du haut pour arrêter."
 screen.plist.local_network_ipad: "Connectez cet iPad à un hôte Freemonplay sur votre réseau local pour l’utiliser comme écran supplémentaire."
+
+# Desktop role picker
+screen.mode.title: "Choisir un rôle"
+screen.mode.host: "Utiliser comme hôte"
+screen.mode.host_help: "Ajoutez un écran à cet ordinateur."
+screen.mode.screen: "Utiliser comme écran"
+screen.mode.screen_help: "Affichez ici le bureau d’un autre ordinateur."
+screen.mode.host_failed: "Impossible de démarrer l’hôte."
+screen.mode.choose: "Choisir un rôle"
+host.menu.choose_role: "Choisir un rôle"

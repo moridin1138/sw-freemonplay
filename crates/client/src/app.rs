@@ -70,6 +70,7 @@ pub enum UserEvent {
 
 /// From the command line; used once at startup.
 pub struct Startup {
+    pub host_app: Option<std::path::PathBuf>,
     pub monitor: Option<usize>,
     pub all_monitors: bool,
     pub keyboard_mouse: bool,
@@ -158,6 +159,7 @@ pub struct App {
     proxy: EventLoopProxy<UserEvent>,
     store: Arc<Mutex<ClientStore>>,
     hosts: HostList,
+    browsing: bool,
     client_name: String,
     startup: Startup,
     options: Options,
@@ -198,6 +200,7 @@ pub struct App {
     /// in our windows too, and mustn't be sent back.
     host_in_control: Arc<AtomicBool>,
     pub exit_error: Option<String>,
+    switching_to_host: bool,
     #[cfg(target_os = "ios")]
     active: bool,
     #[cfg(target_os = "ios")]
@@ -210,22 +213,23 @@ impl App {
         rt: tokio::runtime::Handle,
         proxy: EventLoopProxy<UserEvent>,
         store: Arc<Mutex<ClientStore>>,
-        hosts: HostList,
         client_name: String,
         startup: Startup,
         options: Options,
     ) -> Self {
         let egui_ctx = egui::Context::default();
         ui::style(&egui_ctx);
+        let screen = if startup.host_app.is_some() && startup.host.is_none() { Screen::ChooseRole } else { Screen::Hosts };
         Self {
             rt,
             proxy,
             store,
-            hosts,
+            hosts: HostList::default(),
+            browsing: false,
             client_name,
             startup,
             options,
-            screen: Screen::Hosts,
+            screen,
             message: None,
             address: String::new(),
             displays: BTreeMap::new(),
@@ -249,6 +253,7 @@ impl App {
             logo: None,
             host_in_control: Arc::default(),
             exit_error: None,
+            switching_to_host: false,
             #[cfg(target_os = "ios")]
             active: false,
             #[cfg(target_os = "ios")]
@@ -275,7 +280,8 @@ impl App {
     }
 
     fn open_window(&mut self, event_loop: &ActiveEventLoop) -> anyhow::Result<()> {
-        let mut attrs = Window::default_attributes().with_title("Freemonplay Screen");
+        let title = if self.startup.host_app.is_some() { "Freemonplay" } else { "Freemonplay Screen" };
+        let mut attrs = Window::default_attributes().with_title(title);
         #[cfg(not(target_os = "ios"))]
         { attrs = attrs.with_inner_size(PICKER_SIZE); }
         if let Some(i) = self.startup.monitor {
@@ -320,6 +326,7 @@ impl App {
             self.options.main_role = Role::KeyboardMouse;
             self.options.roles = others.into_iter().map(|k| (k, Role::KeyboardMouse)).collect();
         }
+        if !matches!(self.screen, Screen::ChooseRole) { self.start_browsing(); }
         if let Some(spec) = self.startup.host.take() {
             self.connect_address(spec);
         }
@@ -804,8 +811,40 @@ impl App {
         self.target = None;
     }
 
+    fn start_browsing(&mut self) {
+        if self.browsing { return; }
+        let proxy = self.proxy.clone();
+        match net::browse(move || { let _ = proxy.send_event(UserEvent::HostsChanged); }) {
+            Ok(hosts) => {
+                self.hosts = hosts;
+                self.browsing = true;
+            }
+            Err(error) => tracing::warn!("couldn't start discovery: {error:#}"),
+        }
+    }
+
     fn handle(&mut self, action: Action) {
         match action {
+            Action::ChooseRole => {
+                self.message = None;
+                self.screen = Screen::ChooseRole;
+            }
+            Action::UseScreen => {
+                self.start_browsing();
+                self.message = None;
+                self.screen = Screen::Hosts;
+            }
+            Action::UseHost => {
+                if let Some(path) = &self.startup.host_app {
+                    match crate::desktop_roles::start_host(path) {
+                        Ok(()) => self.switching_to_host = true,
+                        Err(error) => {
+                            tracing::error!("couldn't start host: {error}");
+                            self.message = Some(t!("screen.mode.host_failed").into_owned());
+                        }
+                    }
+                }
+            }
             Action::Connect(i) => {
                 let target = self.hosts.lock().unwrap().get(i).cloned();
                 if let Some(target) = target {
@@ -868,6 +907,7 @@ impl App {
                 ui,
                 ui::View {
                     screen: &mut self.screen,
+                    can_host: self.startup.host_app.is_some(),
                     hosts: &hosts,
                     monitors: &monitors,
                     kvm_supported: kvm::supported(),
@@ -1247,6 +1287,7 @@ impl ApplicationHandler<UserEvent> for App {
                 #[cfg(target_os = "ios")]
                 if !self.active { return; }
                 if self.streaming() || view != MAIN { self.draw_stream(view) } else { self.draw_ui() }
+                if self.switching_to_host { event_loop.exit(); }
                 return;
             }
             _ => {}

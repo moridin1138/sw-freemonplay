@@ -28,14 +28,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > notes.md <<'EOF'
-          **Mac (the computer that wants more screens):** open `freemonplay-host-macos.dmg` and drag Freemonplay Host to Applications. The first time, allow it in System Settings > Privacy & Security > Open Anyway.
-
-          **Windows PC (preview, the computer that wants more screens):** run `freemonplay-host-windows-x64-setup.exe`. It asks for administrator rights once, to install the Virtual Display Driver (so screens extend the desktop) and a firewall rule. Freemonplay Host then lives in the notification area by the clock.
-
-          **Screens:** on each device that should become a screen (or take the Mac's keyboard and mouse):
-          - **Windows:** run `freemonplay-screen-windows-x64-setup.exe` (no administrator rights needed; a newer one updates in place). If SmartScreen warns, choose More info, then Run anyway. `freemonplay-screen-windows-x64.zip` is the same program without an installer.
-          - **Mac:** open `freemonplay-screen-macos.dmg`, and drag Freemonplay Screen to Applications.
-          - **Linux:** unpack `freemonplay-screen-linux-x86_64.tar.gz` and run `freemonplay-screen` (the `.desktop` file adds it to the app menu). It needs GStreamer's plugins: `sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-libav` (plus `intel-media-va-driver` for Intel GPU decoding).
+          - **Mac:** open `freemonplay-macos.dmg`, drag Freemonplay to Applications, then choose Host or Screen.
+          - **Windows:** run `freemonplay-windows-x64-setup.exe`, open Freemonplay, then choose Host or Screen. The host setup guide can install the display driver and firewall rule when needed.
+          - **Linux:** unpack `freemonplay-screen-linux-x86_64.tar.gz` and run `freemonplay-screen`. The included desktop entry adds it to the app menu. Install GStreamer's plugins: `sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-libav` (plus `intel-media-va-driver` for Intel GPU decoding).
 
           The downloads aren't signed with a paid certificate, so macOS and Windows warn the first time: [what to expect and how to open them](https://github.com/moridin1138/sw-freemonplay#security-warnings-when-installing).
           EOF

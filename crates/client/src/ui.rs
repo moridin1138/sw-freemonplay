@@ -24,6 +24,7 @@ const ERROR: Color32 = Color32::from_rgb(255, 140, 120);
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon-256.png");
 
 pub enum Screen {
+    ChooseRole,
     Hosts,
     Code { target: Target, fingerprint: String, code: String, error: Option<String> },
     Connecting { to: String },
@@ -123,6 +124,9 @@ impl Options {
 }
 
 pub enum Action {
+    ChooseRole,
+    UseHost,
+    UseScreen,
     Connect(usize),
     ConnectAddress(String),
     SubmitCode,
@@ -304,6 +308,7 @@ pub fn stream_hint(ctx: &egui::Context, toolbar: bool) {
 }
 
 pub struct View<'a> {
+    pub can_host: bool,
     pub screen: &'a mut Screen,
     pub hosts: &'a [HostRow],
     pub monitors: &'a [MonitorRow],
@@ -324,14 +329,19 @@ pub fn draw(ui: &mut egui::Ui, view: View<'_>) -> Option<Action> {
         .frame(egui::Frame::new().fill(GRAPHITE).inner_margin(egui::Margin::symmetric(28, 24)))
         .show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                header(ui, view.logo);
+                if view.can_host { app_header(ui, view.logo); } else { header(ui, view.logo); }
                 ui.add_space(14.0);
                 if let Some(message) = view.message {
                     notice(ui, message);
                     ui.add_space(6.0);
                 }
                 action = match view.screen {
-                    Screen::Hosts => hosts(ui, view.hosts, view.monitors, view.kvm_supported, view.address, view.options),
+                    Screen::ChooseRole => role_choice(ui),
+                    Screen::Hosts => {
+                        let change = view.can_host && ui.button(t!("screen.mode.choose")).clicked();
+                        if change { Some(Action::ChooseRole) }
+                        else { hosts(ui, view.hosts, view.monitors, view.kvm_supported, view.address, view.options) }
+                    }
                     Screen::Code { target, code, error, .. } => code_dialog(ui, &target.name, code, error.as_deref()),
                     Screen::Connecting { to } => connecting(ui, to),
                     Screen::Streaming => None,
@@ -393,7 +403,7 @@ fn draw_ipad(ui: &mut egui::Ui, view: View<'_>) -> Option<Action> {
                             }
                             Screen::Code { target, code, error, .. } => code_dialog(ui, &target.name, code, error.as_deref()),
                             Screen::Connecting { to } => connecting(ui, to),
-                            Screen::Streaming => None,
+                            Screen::ChooseRole | Screen::Streaming => None,
                             Screen::Remote { host } => remote(ui, host),
                         };
                         ui.add_space(32.0);
@@ -402,6 +412,89 @@ fn draw_ipad(ui: &mut egui::Ui, view: View<'_>) -> Option<Action> {
             });
         });
     action
+}
+
+fn app_header(ui: &mut egui::Ui, logo: Option<&egui::TextureHandle>) {
+    ui.horizontal(|ui| {
+        if let Some(logo) = logo {
+            ui.add(egui::Image::new((logo.id(), Vec2::splat(48.0))).corner_radius(12.0));
+        }
+        ui.label(RichText::new("Freemonplay").size(26.0).strong().color(Color32::WHITE));
+    });
+}
+
+fn role_choice(ui: &mut egui::Ui) -> Option<Action> {
+    ui.label(RichText::new(t!("screen.mode.title")).size(18.0).strong());
+    ui.add_space(10.0);
+    let side_by_side = ui.available_width() >= 380.0;
+    let width = if side_by_side { (ui.available_width() - 12.0) / 2.0 } else { ui.available_width() };
+    let choices = |ui: &mut egui::Ui| {
+        let host = role_tile(ui, width, true, &t!("screen.mode.host"), &t!("screen.mode.host_help"));
+        ui.add_space(12.0 - ui.spacing().item_spacing.x * if side_by_side { 1.0 } else { 0.0 });
+        let screen = role_tile(ui, width, false, &t!("screen.mode.screen"), &t!("screen.mode.screen_help"));
+        if host { Some(Action::UseHost) } else if screen { Some(Action::UseScreen) } else { None }
+    };
+    if side_by_side { ui.horizontal(choices).inner } else { choices(ui) }
+}
+
+fn role_tile(ui: &mut egui::Ui, width: f32, host: bool, title: &str, detail: &str) -> bool {
+    let text = |text: &str, size, color| {
+        let mut job = egui::text::LayoutJob::simple(text.to_owned(), egui::FontId::proportional(size), color, (width - 24.0).max(1.0));
+        job.halign = Align::Center;
+        ui.painter().layout_job(job)
+    };
+    let title_text = text(title, 17.0, Color32::WHITE);
+    let detail_text = text(detail, 13.0, MUTED);
+    let height = (129.0 + title_text.size().y + detail_text.size().y).max(180.0);
+    let tile = ui.add(egui::Button::new("").corner_radius(14).min_size(vec2(width, height)));
+    tile.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
+    role_icon(ui.painter(), tile.rect.center_top() + vec2(0.0, 54.0), host);
+    let painter = ui.painter();
+    let top = tile.rect.center_top() + vec2(0.0, 103.0);
+    let detail_top = top + vec2(0.0, title_text.size().y + 9.0);
+    painter.galley(top, title_text, Color32::WHITE);
+    painter.galley(detail_top, detail_text, MUTED);
+    tile.clicked()
+}
+
+/// The arrow always follows the desktop picture, from its computer to the extra screen.
+fn role_icon(painter: &egui::Painter, center: egui::Pos2, host: bool) {
+    let at = |x, y| center + vec2(x, y);
+    let backdrop = egui::Rect::from_center_size(center, vec2(132.0, 64.0));
+    painter.rect_filled(backdrop, 18, Color32::from_rgb(48, 44, 37));
+    let monitor = |x, y, width, height, color, active| {
+        let rect = egui::Rect::from_center_size(at(x, y), vec2(width, height));
+        let stroke = Stroke::new(2.0, color);
+        painter.rect_filled(rect, 4, GRAPHITE);
+        painter.rect_stroke(rect, 4, stroke, egui::StrokeKind::Inside);
+        let foot = rect.center_bottom() + vec2(0.0, 6.0);
+        painter.line_segment([rect.center_bottom(), foot], stroke);
+        painter.line_segment([foot - vec2(8.0, 0.0), foot + vec2(8.0, 0.0)], stroke);
+        if active {
+            // A window on the desktop makes the source more than an empty outline.
+            let window = egui::Rect::from_min_size(rect.left_top() + vec2(7.0, 6.0), vec2(21.0, 15.0));
+            painter.rect_stroke(window, 2, Stroke::new(1.2, color), egui::StrokeKind::Inside);
+            painter.line_segment([window.left_top() + vec2(1.0, 4.0), window.right_top() + vec2(-1.0, 4.0)], Stroke::new(1.2, color));
+        }
+    };
+
+    if host {
+        monitor(-36.0, -4.0, 42.0, 31.0, AMBER, true);
+        monitor(38.0, -1.0, 33.0, 23.0, MUTED, false);
+    } else {
+        monitor(-38.0, -1.0, 34.0, 24.0, MUTED, true);
+        let tablet = egui::Rect::from_center_size(at(35.0, 0.0), vec2(44.0, 34.0));
+        painter.rect_filled(tablet, 6, GRAPHITE);
+        painter.rect_stroke(tablet, 6, Stroke::new(2.0, AMBER), egui::StrokeKind::Inside);
+        painter.rect_filled(tablet.shrink2(vec2(6.0, 5.0)), 2, AMBER.linear_multiply(0.18));
+        painter.circle_filled(tablet.right_center() - vec2(3.5, 0.0), 1.1, AMBER);
+    }
+    let arrow = Stroke::new(2.0, AMBER);
+    let start = if host { -9.0 } else { -16.0 };
+    let end = if host { 15.0 } else { 7.0 };
+    painter.line_segment([at(start, 0.0), at(end, 0.0)], arrow);
+    painter.line_segment([at(end - 5.0, -5.0), at(end, 0.0)], arrow);
+    painter.line_segment([at(end - 5.0, 5.0), at(end, 0.0)], arrow);
 }
 
 fn header(ui: &mut egui::Ui, logo: Option<&egui::TextureHandle>) {

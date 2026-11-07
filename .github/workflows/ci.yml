@@ -31,7 +31,7 @@ env:
 
 jobs:
   macos:
-    name: macOS (menu bar app + client, universal)
+    name: macOS (universal app)
     runs-on: macos-15
     env:
       # Releases are signed with a Developer ID and notarized once the Apple secrets exist
@@ -60,14 +60,10 @@ jobs:
           security list-keychain -d user -s "$keychain"
           echo -n "$ASC_KEY" | base64 --decode -o "$RUNNER_TEMP/AuthKey.p8"
           echo "ASC_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
-      - name: Build the menu bar app
+      - name: Build Freemonplay
         env:
           FMP_SIGN_IDENTITY: ${{ env.SIGN == 'true' && secrets.MACOS_SIGN_IDENTITY || '' }}
-        run: ./build/macos/bundle.sh --universal
-      - name: Build the client app
-        env:
-          FMP_SIGN_IDENTITY: ${{ env.SIGN == 'true' && secrets.MACOS_SIGN_IDENTITY || '' }}
-        run: ./build/macos/bundle.sh --client --universal
+        run: ./build/macos/bundle.sh --unified --universal
       - name: Package
         env:
           FMP_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
@@ -75,11 +71,9 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
           if [ "$SIGN" = true ]; then
-            ./build/macos/notarize.sh "target/Freemonplay Host.app" dist/freemonplay-host-macos.dmg
-            ./build/macos/notarize.sh "target/Freemonplay Screen.app" dist/freemonplay-screen-macos.dmg
+            ./build/macos/notarize.sh "target/Freemonplay.app" dist/freemonplay-macos.dmg
           else
-            ./build/macos/make-dmg.sh "target/Freemonplay Host.app" dist/freemonplay-host-macos.dmg
-            ./build/macos/make-dmg.sh "target/Freemonplay Screen.app" dist/freemonplay-screen-macos.dmg
+            ./build/macos/make-dmg.sh "target/Freemonplay.app" dist/freemonplay-macos.dmg
           fi
       - uses: actions/upload-artifact@v7
         with:
@@ -146,20 +140,12 @@ jobs:
           if ($hash -ne "E24210692B442B39AF763536330CE78B423F19342B7A7792C26DE3944E418B3A") { throw "unexpected driver download ($hash)" }
           Expand-Archive vdd.zip -DestinationPath vdd
           Invoke-WebRequest "https://raw.githubusercontent.com/VirtualDrivers/Virtual-Display-Driver/25.7.23/LICENSE" -OutFile vdd/VirtualDisplayDriver/LICENSE.txt
-      - name: Package
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist, client | Out-Null
-          Copy-Item target/release/freemonplay-screen.exe, LICENSE, README.md client/
-          Compress-Archive -Path client/* -DestinationPath dist/freemonplay-screen-windows-x64.zip
       - name: Installer
         shell: pwsh
         run: |
           choco install innosetup -y --no-progress | Out-Null
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp "/DVersion=$version" build\windows\freemonplay-screen.iss
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp "/DVersion=$version" build\windows\freemonplay-host.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp "/DVersion=$version" build\windows\freemonplay.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload the installers for signing
         if: env.SIGN == 'true'

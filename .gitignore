@@ -1,5 +1,9 @@
 /target
 .DS_Store
 
-# Installers built locally (build/macos/make-dmg.sh, build/windows/freemonplay-screen.iss)
+# Installers built locally (build/macos/make-dmg.sh, build/windows/freemonplay.iss)
 /dist/
+
+# Local Xcode state
+/build/ios/*.xcodeproj/xcuserdata/
+/build/ios/*.xcodeproj/project.xcworkspace/xcuserdata/

@@ -5,8 +5,7 @@
 <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
   <zip-file>
     <pe-file-set>
-      <include path="freemonplay-host-windows-x64-setup.exe"/>
-      <include path="freemonplay-screen-windows-x64-setup.exe"/>
+      <include path="freemonplay-windows-x64-setup.exe"/>
       <for-each>
         <authenticode-sign/>
       </for-each>

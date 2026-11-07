@@ -74,6 +74,7 @@ enum Action {
     ToggleLogin,
     Setup,
     ShowLog,
+    ChooseRole,
     Quit,
 }
 
@@ -304,6 +305,9 @@ impl Tray {
         menu.item(&t!("host.menu.setup"), Action::Setup, false);
         menu.item(&t!("host.menu.log"), Action::ShowLog, false);
         menu.separator();
+        if crate::desktop_roles::picker().is_some() {
+            menu.item(&t!("host.menu.choose_role"), Action::ChooseRole, false);
+        }
         menu.item(&t!("host.menu.quit"), Action::Quit, false);
 
         let mut at = POINT::default();
@@ -357,6 +361,11 @@ impl Tray {
             }
             Action::Setup => self.setup(),
             Action::ShowLog => system::open_path(&self.log),
+            Action::ChooseRole => {
+                if crate::desktop_roles::open_picker() {
+                    self.perform(Action::Quit);
+                }
+            }
             Action::Quit => {
                 tracing::info!("quitting");
                 // Disconnect clients so their virtual monitors are removed cleanly.

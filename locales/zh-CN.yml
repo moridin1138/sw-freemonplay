@@ -204,3 +204,13 @@ screen.plist.local_network: "Freemonplay Screen 会在本地网络中查找可�
 screen.ipad.address_help: "输入主机的 IP 地址。iPad 暂不支持自动发现。"
 screen.ipad.disconnect_help: "轻点顶部栏中的断开连接以停止。"
 screen.plist.local_network_ipad: "连接到局域网中的 Freemonplay 主机，将此 iPad 用作额外屏幕。"
+
+# Desktop role picker
+screen.mode.title: "选择角色"
+screen.mode.host: "用作主机"
+screen.mode.host_help: "为此电脑添加额外屏幕。"
+screen.mode.screen: "用作屏幕"
+screen.mode.screen_help: "在这里显示另一台电脑的桌面。"
+screen.mode.host_failed: "无法启动主机。"
+screen.mode.choose: "选择角色"
+host.menu.choose_role: "选择角色"

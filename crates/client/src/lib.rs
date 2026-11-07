@@ -16,6 +16,7 @@ mod kvm;
 mod link;
 mod net;
 mod render;
+mod desktop_roles;
 #[cfg(target_os = "windows")]
 mod render_d3d12;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -128,20 +129,13 @@ pub fn run() -> Result<()> {
     let saved = store.lock().unwrap().settings();
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
-    let hosts = {
-        let proxy = proxy.clone();
-        net::browse(move || {
-            let _ = proxy.send_event(UserEvent::HostsChanged);
-        })?
-    };
-
     let mut app = app::App::new(
         rt.handle().clone(),
         proxy,
         store,
-        hosts,
         args.name.clone().unwrap_or_else(hostname),
         app::Startup {
+            host_app: desktop_roles::host_app(),
             monitor: args.monitor,
             all_monitors: args.all_monitors,
             keyboard_mouse: args.keyboard_mouse,

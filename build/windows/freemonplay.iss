@@ -1,9 +1,9 @@
-; Inno Setup script for the Windows host (the PC that gets extra screens). CI compiles it with:
-;   iscc /DVersion=0.2.0 /DSource=..\..\target\release /DDriver=..\..\vdd\VirtualDisplayDriver build\windows\freemonplay-host.iss
+; Inno Setup script for both Freemonplay roles. CI compiles it with:
+;   iscc /DVersion=0.2.0 /DSource=..\..\target\release /DDriver=..\..\vdd\VirtualDisplayDriver build\windows\freemonplay.iss
 ; where Driver is the unpacked VirtualDisplayDriver-x86.Driver.Only.zip (MIT licensed,
 ; signed by the SignPath Foundation) with its LICENSE.txt added.
-; Installing the display driver and the firewall rule needs administrator rights, so this
-; installer asks for them once; the tray app itself runs as the signed-in user.
+; The installer can upgrade the old host installation. The host setup guide installs
+; the driver and firewall rule when they are needed.
 
 #ifndef Version
   #define Version "0.0.0"
@@ -17,19 +17,19 @@
 
 [Setup]
 AppId={{2B7D9E41-5C3A-4F86-A1E0-7D4C2B9F6E13}
-AppName=Freemonplay Host
+AppName=Freemonplay
 AppVersion={#Version}
-AppVerName=Freemonplay Host {#Version}
+AppVerName=Freemonplay {#Version}
 AppPublisher=moridin1138
 AppPublisherURL=https://github.com/moridin1138/sw-freemonplay
-DefaultDirName={autopf}\Freemonplay Host
+DefaultDirName={autopf}\Freemonplay
 DefaultGroupName=Freemonplay
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
-OutputBaseFilename=freemonplay-host-windows-x64-setup
+OutputBaseFilename=freemonplay-windows-x64-setup
 OutputDir=..\..\dist
 SetupIconFile=icon.ico
-UninstallDisplayIcon={app}\freemonplay-host.exe
+UninstallDisplayIcon={app}\freemonplay-screen.exe
 LicenseFile=..\..\LICENSE
 Compression=lzma2
 SolidCompression=yes
@@ -47,22 +47,27 @@ UsedUserAreasWarning=no
 Name: "startup"; Description: "{cm:StartupTask}"
 
 [Files]
+Source: "{#Source}\freemonplay-screen.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Source}\freemonplay-host.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Driver}\*"; DestDir: "{app}\driver"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"
 Source: "..\..\README.md"; DestDir: "{app}"
 
+[InstallDelete]
+Type: files; Name: "{group}\Freemonplay Host.lnk"
+Type: files; Name: "{group}\Uninstall Freemonplay Host.lnk"
+
 [Icons]
-Name: "{group}\Freemonplay Host"; Filename: "{app}\freemonplay-host.exe"; Comment: "{cm:HostComment}"
-Name: "{group}\Uninstall Freemonplay Host"; Filename: "{uninstallexe}"
+Name: "{group}\Freemonplay"; Filename: "{app}\freemonplay-screen.exe"
+Name: "{group}\Uninstall Freemonplay"; Filename: "{uninstallexe}"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "freemonplay"; ValueData: """{app}\freemonplay-host.exe"""; Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
-Filename: "{app}\freemonplay-host.exe"; Parameters: "--install-display-driver ""{app}\driver"" --allow-firewall"; StatusMsg: "{cm:InstallingDriver}"; Flags: runhidden waituntilterminated
-Filename: "{app}\freemonplay-host.exe"; Description: "{cm:LaunchProgram,Freemonplay Host}"; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{app}\freemonplay-screen.exe"; Description: "{cm:LaunchProgram,Freemonplay}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
 Filename: "{app}\freemonplay-host.exe"; Parameters: "--quit"; Flags: runhidden waituntilterminated; RunOnceId: "StopHost"
-Filename: "{app}\freemonplay-host.exe"; Parameters: "--uninstall-display-driver --remove-firewall"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveDriver"
+; The driver is optional and may be used by another app. Leave it installed.
+Filename: "{app}\freemonplay-host.exe"; Parameters: "--remove-firewall"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveFirewall"

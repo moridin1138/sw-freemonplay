@@ -204,3 +204,13 @@ screen.plist.local_network: "Freemonplay Screen, yerel ağınızda ekranı olabi
 screen.ipad.address_help: "Ana bilgisayarın IP adresini girin. Otomatik keşif henüz iPad’de kullanılamıyor."
 screen.ipad.disconnect_help: "Durdurmak için üst çubuktaki Bağlantıyı kes düğmesine dokunun."
 screen.plist.local_network_ipad: "Bu iPad’i ek ekran olarak kullanmak için yerel ağınızdaki bir Freemonplay ana bilgisayarına bağlanın."
+
+# Desktop role picker
+screen.mode.title: "Rol seç"
+screen.mode.host: "Ana bilgisayar olarak kullan"
+screen.mode.host_help: "Bu bilgisayara ek ekran ekleyin."
+screen.mode.screen: "Ekran olarak kullan"
+screen.mode.screen_help: "Başka bir bilgisayarın masaüstünü burada gösterin."
+screen.mode.host_failed: "Ana bilgisayar başlatılamadı."
+screen.mode.choose: "Rol seç"
+host.menu.choose_role: "Rol seç"

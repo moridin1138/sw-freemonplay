@@ -206,3 +206,13 @@ screen.plist.local_network: "Freemonplay Screen finds computers to be a screen f
 screen.ipad.address_help: "Enter the host computer’s IP address. Automatic discovery is not available on iPad yet."
 screen.ipad.disconnect_help: "Tap Disconnect in the bar at the top to stop."
 screen.plist.local_network_ipad: "Connect to a Freemonplay host on your local network to use this iPad as an extra screen."
+
+# Desktop role picker
+screen.mode.title: "Choose a role"
+screen.mode.host: "Use as Host"
+screen.mode.host_help: "Add an extra screen to this computer."
+screen.mode.screen: "Use as Screen"
+screen.mode.screen_help: "Show another computer’s desktop here."
+screen.mode.host_failed: "Could not start the host."
+screen.mode.choose: "Choose a role"
+host.menu.choose_role: "Choose a role"

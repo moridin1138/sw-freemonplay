@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds "target/Freemonplay Host.app": the host as a menu bar app.
+# Builds "target/Freemonplay Host.app": the standalone menu bar app.
+#   ./build/macos/bundle.sh --unified   one Freemonplay.app with both roles
 #   ./build/macos/bundle.sh              build only
 #   ./build/macos/bundle.sh --install    build and copy to /Applications (recommended)
 #   ./build/macos/bundle.sh --universal  Apple Silicon + Intel in one binary (used for releases)
@@ -24,16 +25,18 @@ version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 install=false
 universal=false
 client=false
+unified=false
 for arg in "$@"; do
     case "$arg" in
         --install) install=true ;;
         --universal) universal=true ;;
         --client) client=true ;;
+        --unified) unified=true ;;
         *) echo "unknown option $arg" >&2; exit 1 ;;
     esac
 done
 
-if $client; then
+if $client || $unified; then
     package=freemonplay-screen
     name="Freemonplay Screen"
     old_name="freemonplay Screen"
@@ -51,6 +54,11 @@ else
     # Menu bar only: no Dock icon or app menu.
     ui_element=true
     text_prefix=host
+fi
+if $unified; then
+    name=Freemonplay
+    old_name=Freemonplay
+    bundle_id=io.github.moridin1138.freemonplay.desktop
 fi
 app="target/$name.app"
 
@@ -125,6 +133,16 @@ for file in locales/*.yml; do
     printf '"NSLocalNetworkUsageDescription" = "%s";\n' "$reason" > "$lproj/InfoPlist.strings"
 done
 
+if $unified; then
+    # Keep the host in its own nested app to preserve its macOS permissions and login item.
+    host_args=()
+    if $universal; then host_args+=(--universal); fi
+    ./build/macos/bundle.sh "${host_args[@]}"
+    mkdir -p "$app/Contents/Helpers"
+    ditto "target/Freemonplay Host.app" "$app/Contents/Helpers/Freemonplay Host.app"
+    rm -rf "target/Freemonplay Host.app"
+fi
+
 identity="freemonplay Local Signing"
 if [ -n "${FMP_SIGN_IDENTITY:-}" ]; then
     codesign --force --options runtime --timestamp --sign "$FMP_SIGN_IDENTITY" --identifier "$bundle_id" "$app"
@@ -145,13 +163,15 @@ if $install; then
     dest="/Applications/$name.app"
     # Before 0.3 the apps were "freemonplay.app" (running as "freemonplay") and
     # "freemonplay Screen.app".
-    for running in "$executable" freemonplay freemonplay-client; do
-        if pgrep -xq "$running"; then
-            echo "Quitting the running $running first"
-            pkill -x "$running" || true
-            sleep 1
-        fi
-    done
+    if ! $unified; then
+        for running in "$executable" freemonplay freemonplay-client; do
+            if pgrep -xq "$running"; then
+                echo "Quitting the running $running first"
+                pkill -x "$running" || true
+                sleep 1
+            fi
+        done
+    fi
     rm -rf "$dest" "/Applications/$old_name.app"
     cp -R "$app" "$dest"
     # Leave only one copy, so Spotlight and Launchpad can't open the build copy by mistake

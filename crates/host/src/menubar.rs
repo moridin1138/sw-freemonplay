@@ -293,18 +293,29 @@ define_class!(
             NSWorkspace::sharedWorkspace().openURL(&url);
         }
 
+        #[unsafe(method(chooseRole:))]
+        fn choose_role(&self, _sender: &NSMenuItem) {
+            if crate::desktop_roles::open_picker() {
+                self.stop();
+            }
+        }
+
         #[unsafe(method(quit:))]
         fn quit(&self, _sender: &NSMenuItem) {
-            tracing::info!("quitting from the menu");
-            // Disconnect clients so their virtual displays are removed cleanly.
-            self.ivars().ctx.shutdown();
-            std::thread::sleep(Duration::from_millis(300));
-            NSApplication::sharedApplication(self.mtm()).terminate(None);
+            self.stop();
         }
     }
 );
 
 impl Controller {
+    fn stop(&self) {
+        tracing::info!("quitting from the menu");
+        // Disconnect clients so their virtual displays are removed cleanly.
+        self.ivars().ctx.shutdown();
+        std::thread::sleep(Duration::from_millis(300));
+        NSApplication::sharedApplication(self.mtm()).terminate(None);
+    }
+
     fn new(mtm: MainThreadMarker, ctx: Arc<Ctx>, log: PathBuf) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(Ivars {
             ctx,
@@ -473,6 +484,9 @@ impl Controller {
         menu.addItem(&self.item(&t!("host.menu.setup"), Some(sel!(showWelcome:)), 0));
         menu.addItem(&self.item(&t!("host.menu.log"), Some(sel!(showLog:)), 0));
         menu.addItem(&NSMenuItem::separatorItem(self.mtm()));
+        if crate::desktop_roles::picker().is_some() {
+            menu.addItem(&self.item(&t!("host.menu.choose_role"), Some(sel!(chooseRole:)), 0));
+        }
         let quit = self.item(&t!("host.menu.quit"), Some(sel!(quit:)), 0);
         quit.setKeyEquivalent(&NSString::from_str("q"));
         menu.addItem(&quit);

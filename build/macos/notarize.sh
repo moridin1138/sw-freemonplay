@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Notarizes a Developer ID signed app (bundle.sh with FMP_SIGN_IDENTITY set), staples it,
 # and packs it into a signed, notarized and stapled disk image.
-#   ./build/macos/notarize.sh "target/Freemonplay Host.app" dist/freemonplay-host-macos.dmg
+#   ./build/macos/notarize.sh "target/Freemonplay.app" dist/freemonplay-macos.dmg
 # Needs FMP_SIGN_IDENTITY ("Developer ID Application: Name (TEAMID)") and an App Store
 # Connect API key: ASC_KEY_PATH (the .p8 file), ASC_KEY_ID and ASC_ISSUER_ID.
 set -euo pipefail
