@@ -2,7 +2,7 @@
 
 # Freemonplay
 
-Turn any spare laptop, tablet or PC into an extra monitor for your Mac, over the network. Free and open source.
+Turn any spare laptop, tablet or PC into an extra monitor for your Mac or Windows PC, over the network. Free and open source.
 
 The **host** (the computer that wants more screens) creates a real virtual monitor for each **client** screen that connects. The OS treats it like a plugged-in display: drag windows onto it, arrange it in Display settings, use your normal mouse on it. The host captures that monitor, encodes it as H.264 and streams it to the client. The client shows it full screen and sends touch, mouse and keyboard back.
 
@@ -14,6 +14,7 @@ See [CHANGELOG.md](CHANGELOG.md) for what's new, [ARCHITECTURE.md](ARCHITECTURE.
 
 | Part | macOS | Windows | Linux |
 |---|---|---|---|
+| One app with Host and Screen roles | ✅ | ✅ | Screen only |
 | Client (view + input) | ✅ | ✅ (tested on a Surface, Iris Xe) | builds; not yet run on Linux |
 | Host: virtual display | ✅ `CGVirtualDisplay` | ✅ preview: Virtual Display Driver (IDD), extends the desktop | planned: Mutter / wlroots / xrandr |
 | Host: capture | ✅ ScreenCaptureKit | ✅ Windows.Graphics.Capture (GPU scaling to NV12) | planned: PipeWire |
@@ -27,7 +28,7 @@ Tested end to end: a Mac host (macOS 15, M4) streaming to Mac and Windows client
 
 An **iPad screen preview** is also available from source (iPadOS 16+, portrait and landscape). It
 connects by address to the existing Mac and Windows hosts. See [the iPad build notes](build/ios/README.md).
-Device installation and end-to-end streaming still need testing.
+An Xcode archive can be signed for TestFlight; end-to-end streaming still needs testing.
 
 ## Build
 
@@ -66,15 +67,30 @@ The `.exe` (in `target/x86_64-pc-windows-gnu/release/`) is self-contained and on
 
 ## Use
 
-On the Mac that wants more screens, install the menu bar app:
+Install **Freemonplay** from the [releases page](https://github.com/moridin1138/sw-freemonplay/releases)
+on both computers. On Mac, drag Freemonplay from `freemonplay-macos.dmg` to Applications.
+On Windows, run `freemonplay-windows-x64-setup.exe` as administrator. Open Freemonplay and choose a role tile:
+
+- **Use as Host** on the computer that needs another monitor. The host lives in the
+  Mac menu bar or Windows notification area and shows the pairing code. Open **Setup Guide…**
+  there to check permissions and setup. The menu also shows connected screens, frame rate,
+  bitrate and latency, and offers disconnect and host settings.
+- **Use as Screen** on the computer that will display it. Select the host and enter
+  its pairing code the first time.
+
+To switch, select **Choose a role** in the host menu or at the top of the screen picker.
+Leaving Host disconnects its screens. On a MacBook with a notch, choose Host again to
+bring up its menu if the icon is hidden. If upgrading from separate apps, quit the old host
+before starting the new one. Pairings and settings carry over; you can remove the old apps.
+
+To build and install the unified Mac app from source:
 
 ```bash
-./build/macos/bundle.sh --install
+./build/macos/bundle.sh --unified --install
 ```
 
-Then open **Freemonplay Host** from Launchpad or Spotlight. The first time, a setup window walks you through the permissions and connecting a screen (**Setup Guide…** in the menu reopens it). It lives in the menu bar (no Dock icon) and shows the pairing code, connected screens with live stats (frame rate, bitrate and estimated latency, with a breakdown per screen) and a Disconnect option for each, plus the codec, frame rate and input settings, Open at Login and the log. Install it to /Applications as above: macOS can stall apps that run from inside Documents, Desktop or Downloads behind file-access prompts.
-
-On MacBooks with a notch, menu bar icons that don't fit are hidden behind it. If you can't see the Freemonplay icon, open Freemonplay again (from Spotlight or Launchpad) and its menu appears at the pointer, or Cmd-drag other icons to make room.
+Install to Applications: macOS can stall apps in Documents or Downloads behind file
+access prompts.
 
 **Keep permissions across rebuilds (once per Mac):** macOS ties Screen Recording and Accessibility permissions to the app's signature. By default the app gets a throwaway (ad-hoc) signature, so every rebuild needs the permissions re-enabled. Create a local signing identity once and `bundle.sh` uses it automatically:
 
@@ -94,13 +110,13 @@ The first run asks for two permissions (System Settings > Privacy & Security), f
 - **Screen & System Audio Recording**, so it can capture the virtual displays. Restart the app or terminal after granting it.
 - **Accessibility**, so clients can control the mouse and keyboard. Without it the screens are view-only.
 
-On each device that should become a screen, install the client from the [latest release](https://github.com/moridin1138/sw-freemonplay/releases/latest): the setup program on Windows (no administrator rights needed), the **Freemonplay Screen** disk image on a Mac, or the Linux download. Or run a build directly:
+On Linux, run the screen app from the release tarball. On iPad, use the
+[iPad screen build](build/ios/README.md). The standalone `freemonplay-screen` command
+and its options are still available for development.
 
-```bash
-./freemonplay-screen
-```
-
-To build the installers yourself: `./build/macos/bundle.sh --client` makes `target/Freemonplay Screen.app`, and on Windows, [Inno Setup](https://jrsoftware.org/isinfo.php) compiles `build/windows/freemonplay-screen.iss` (the client) and `build/windows/freemonplay-host.iss` (the host, which also needs the unpacked driver; see the script) after a release build, into `dist/`.
+To build the Windows installer yourself, use Inno Setup to compile
+`build/windows/freemonplay.iss` after building both binaries and unpacking the driver
+(see the script for paths).
 
 A window lists the computers running Freemonplay on your network. Drag it to the monitor you want to use, click **Connect**, and enter the pairing code shown in the host's menu the first time (after that it reconnects without one). The screen fills that monitor; disconnecting brings the list back. If the connection drops out (Wi-Fi gone for a while), the screen reconnects by itself for 15 seconds, and the host keeps its display meanwhile so the windows on it stay put. Under **Monitors**, each of the device's monitors can be:
 - **Screen for the host:** another screen for the Mac (arrange them in its Display settings; they're remembered).
@@ -138,9 +154,13 @@ Quick test on one Mac: run the host, then `freemonplay-screen --host 127.0.0.1 -
 
 ### Windows as the host (preview)
 
-A Windows PC can get extra screens too. Run `freemonplay-host-windows-x64-setup.exe` from the [latest release](https://github.com/moridin1138/sw-freemonplay/releases/latest). It asks for administrator rights once, to install the [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT licensed, signed by the SignPath Foundation; Windows may ask whether to trust its publisher) and a Windows Firewall rule for Freemonplay. The driver is set up with three virtual monitors and common resolutions, including Mac Retina sizes.
+Choose **Use as Host** in Freemonplay. To extend the desktop, install the
+Virtual Display Driver and allow the firewall rule from the host's **Setup Guide…**.
+These steps need administrator rights. The installer includes the signed, MIT licensed
+driver, with three virtual monitors and common resolutions including Mac Retina sizes.
+Uninstalling Freemonplay leaves the driver installed because other apps may use it.
 
-Freemonplay then lives in the notification area by the clock (under the ^ arrow if Windows hides it). Its menu matches the Mac's: the pairing code, connected screens with live stats and Disconnect, the codec, frame rate, input and clipboard settings, Start at Sign-in and the log. The first time, a setup dialog checks the driver and the firewall rule (installing either with one click) and shows the pairing code; **Setup Guide…** in the menu, or opening Freemonplay again, brings it back.
+Freemonplay then lives in the notification area by the clock (under the ^ arrow if Windows hides it). Its menu matches the Mac's: the pairing code, connected screens with live stats and Disconnect, the codec, frame rate, input and clipboard settings, Start at Sign-in and the log. The first time, a setup dialog checks the driver and the firewall rule (installing either with one click) and shows the pairing code; **Setup Guide…** in the menu brings it back.
 
 Each screen that connects extends the desktop onto its own virtual monitor, removed again when it disconnects. Each gets that screen's own display scale (a Retina Mac 200%, a PC at 150% 150%), so text appears the size it would there. Without the driver, screens mirror the primary monitor.
 
@@ -148,7 +168,7 @@ Without the installer, build `freemonplay-host` and run, as administrator, `free
 
 ## Languages
 
-Both apps follow the computer's language: English, German, Spanish, French, Turkish and Simplified Chinese so far. Translations are plain text files in [`locales`](locales), one per language, and new ones are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+Both roles follow the computer's language: English, German, Spanish, French, Turkish and Simplified Chinese so far. Translations are plain text files in [`locales`](locales), one per language, and new ones are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## How it works
 
@@ -157,7 +177,7 @@ One QUIC connection per screen: the host captures its virtual display, hardware 
 ## Known limitations and next steps
 
 - **iPad preview:** manual host address, one screen, no clipboard sharing or
-  keyboard and mouse mode. Leaving the app disconnects the session. No signed download yet.
+  keyboard and mouse mode. Leaving the app disconnects the session. TestFlight archive builds are supported.
 
 - **Hardware encoding is macOS only.** On a Mac, captured frames go straight from ScreenCaptureKit into the hardware encoder with no copy (VideoToolbox's low-latency mode, Constrained High profile). Other hosts would fall back to OpenH264, which is CPU-hungry above 1440p.
 - **Clients decode with the OS's decoder**: VideoToolbox on macOS, Media Foundation with DXVA on Windows, GStreamer (VAAPI where available) on Linux.
@@ -185,7 +205,7 @@ Freemonplay is free and open source, made by one developer, and its downloads ar
 
 - Every download on the [releases page](https://github.com/moridin1138/sw-freemonplay/releases) is built by this repository's GitHub Actions workflows from the public source code of that release, not on anyone's own computer. GitHub shows each file's SHA-256 checksum on the releases page, so you can check that your download matches.
 - You can read every line of the source here, and [build the apps yourself](#build) if you'd rather.
-- The Windows host installer also contains the [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT licensed), unchanged and still signed by its own publisher.
+- The Windows installer contains the [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT licensed), unchanged and still signed by its own publisher.
 - Freemonplay talks only to the computers you connect it to on your own network (and announces itself there, so they can find it). It doesn't send information anywhere else unless you ask it to, such as opening the download page from the setup window. See the [privacy policy](PRIVACY.md).
 
 Signing may come later if the project grows enough to cover the cost; the release workflows are ready for it ([SIGNING.md](SIGNING.md)).

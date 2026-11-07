@@ -1,8 +1,9 @@
 # Signing releases
 
-**Status (October 2026):** releases are unsigned. The SignPath Foundation declined the
-application, and paid signing (Apple's US$99 a year; Microsoft Artifact Signing, about
-US$10 a month) waits until the project can justify it. The README's "Security warnings when
+**Status (November 2026):** desktop releases are unsigned. Apple Developer membership
+is active and the iPad uses Apple Distribution signing for TestFlight. Developer ID
+signing for Mac releases is still to configure. The SignPath Foundation declined the
+application; Microsoft Artifact Signing (about US$10 a month) is still on hold. The README's "Security warnings when
 installing" section tells users what to expect meanwhile. The workflows below stay ready:
 they sign as soon as the secrets exist (the SignPath steps would become Artifact Signing
 steps if that's the route taken).
@@ -59,3 +60,13 @@ permissions people grant, not entitlements.
 The first signed release asks for Screen Recording and Accessibility one more time (the
 signature changes from ad hoc to Developer ID). After that the permissions survive updates,
 as long as the bundle IDs and the team stay the same.
+
+## iPad TestFlight
+
+The maintainer's Apple Developer team is configured in
+`build/ios/Freemonplay.xcodeproj`. `build/ios/archive.sh` creates a release archive and
+exports an Apple Distribution signed IPA with automatic App Store provisioning. See
+[the iPad build notes](build/ios/README.md) for versions, build numbers and upload steps.
+This uses Xcode's existing account and Keychain credentials. Do not store certificates,
+private keys or provisioning profiles in the repository. iPad distribution signing does
+not configure Developer ID signing for the Mac release workflow.

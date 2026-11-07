@@ -21,6 +21,17 @@ creates a real virtual monitor, captures it, hardware encodes it and streams it.
 **client** shows the stream full screen and sends input back. One session is one screen:
 a client using several of its monitors runs several sessions.
 
+## Desktop app roles
+
+Mac and Windows ship one app with two existing engines. The screen executable opens the
+role picker when it finds the packaged host. Its icons show the desktop moving from the
+source computer to the extra display. Choosing Screen starts discovery; choosing
+Host opens the bundled host and exits the picker. The host menu can open the picker and
+shut down its sessions. The engines stay in separate processes so they keep their own
+window loops, permissions and settings. On Mac the host is a nested app with the original
+host bundle ID; on Windows the executables are installed side by side. Linux and iPad
+keep the screen-only UI. This packaging does not change the protocol.
+
 ## Crates
 
 ```
@@ -318,12 +329,9 @@ refresh aren't included, so the real figure is somewhat higher.
 - `freemonplay-screen --self-test`: real decoder and renderer, off screen; checks
   colours, timestamps and which path ran (zero copy or copying). Works over SSH.
 - `freemonplay-host --test-pattern`: streams a generated picture, no permissions needed.
-- CI (`.github/workflows/ci.yml`) builds the Mac menu bar app, the Mac client app
-  (`bundle.sh --client`), the Windows client and its Inno Setup installer
-  (`build/windows/freemonplay-screen.iss`; the icon is embedded by `crates/client/build.rs`), the
-  Windows host installer (`build/windows/freemonplay-host.iss`, bundling the Virtual Display
-  Driver, pinned by version and checksum; `crates/host/build.rs` embeds the icon and a
-  manifest for Common Controls 6 and per-monitor DPI awareness), and
+- CI (`.github/workflows/ci.yml`) builds the unified Mac app (`bundle.sh --unified`),
+  the Windows binaries and their one Inno Setup installer (`build/windows/freemonplay.iss`,
+  bundling the Virtual Display Driver pinned by version and checksum), and
   the Linux client. For `v*` tags, once the credentials exist, the Windows programs and
   installers are signed through the SignPath Foundation and the Mac apps and disk images are
   Developer ID signed and notarized (`build/macos/notarize.sh`; see SIGNING.md).
@@ -342,11 +350,16 @@ Discovery returns an empty list on iPad for now: the desktop mDNS implementation
 multicast, which requires an additional Apple entitlement. Connection by address stays
 available. Clipboard polling and remote control of the iPad are disabled. A persistent
 stream toolbar accepts touches without sending those touches to the host. The app rotates
-to portrait or landscape and disconnects and stops drawing when UIKit suspends it. Device signing,
-Bonjour discovery and real-device streaming validation remain outstanding.
+to portrait or landscape and disconnects and stops drawing when UIKit suspends it. Bonjour discovery and real-device streaming validation remain outstanding.
 
 The iPad connection UI uses a centered panel capped at 600 points with 48 point touch
 controls and vertical scrolling for short windows and the software keyboard. Both
 portrait orientations and both landscape orientations are declared in the app bundle.
 Rotation resizes the render surface and letterboxes the existing video; it does not
 renegotiate the host display. Pointer coordinates use the same letterbox mapping.
+
+`build/ios/Freemonplay.xcodeproj` provides the signed distribution target. Its Rust build
+phase (`build-rust.sh`) builds the static library for device or ARM64 simulator and copies
+the localized network prompt resources. Xcode links `main.m`, compiles the icon catalog,
+includes `PrivacyInfo.xcprivacy`, and handles signing. `archive.sh` archives and exports
+an App Store distribution package locally; upload is a separate step. No protocol change.

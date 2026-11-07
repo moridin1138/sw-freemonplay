@@ -7,14 +7,19 @@ publishes it as the release notes.
 ## [Unreleased]
 
 ### Changed
+- **One Freemonplay app on Mac and Windows:** install once, then choose Host or Screen.
+  The role icons show where the desktop picture goes. Return to the picker from either role. Windows offers driver and firewall setup
+  when you choose Host. Existing pairings carry over.
 - **iPad layout:** larger touch controls, a centered connection panel that scrolls with
   the keyboard, and support for portrait and landscape. Rotating fits the streamed
   picture to the screen while keeping the host display resolution.
 
 ### Added
+- **iPad distribution builds:** an Xcode project and archive script for signed TestFlight
+  packages, with an app icon, privacy manifest and localized network prompts.
 - **iPad screen preview:** an iPadOS 16+ app built from the shared screen client, with
   connection by address, pairing, VideoToolbox decoding, Metal display and touch input.
-  Automatic discovery, clipboard sharing and device signing are still to do.
+  Automatic discovery, clipboard sharing and real-device streaming validation are still to do.
 
 ## [0.4.0] - 2026-11-01
 
